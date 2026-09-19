@@ -59,7 +59,7 @@ export default function Results({ a }: { a: A }) {
           ))}
         </tbody>
       </table>
-      <p className="fine left">Claim-level results only. ProofLayer does not compute an overall security score and does not call a product “safe” or “unsafe”.</p>
+      <p className="fine left">Claim-level results only. Argus does not compute an overall security score and does not call a product “safe” or “unsafe”.</p>
 
       <div className="actions">
         <button className="ghost" onClick={() => a.setRoute('new')}>New assessment</button>

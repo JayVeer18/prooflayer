@@ -43,6 +43,9 @@ h3{margin:0}
 .brand{background:none;border:0;text-align:left;padding:6px 10px 16px;display:flex;flex-direction:column;gap:2px}
 .brand b{font-family:var(--mono);letter-spacing:.3em;font-size:12px}
 .brand span{font-size:11px;color:var(--dim)}
+.brand-top{display:flex;align-items:center;gap:9px;color:var(--ink)}
+.brand-top svg{flex:none}
+.brand:hover .brand-top{color:var(--accent)}
 .nav{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;border-radius:8px;padding:9px 10px;color:#aab0bd;text-align:left}
 .nav i{font-style:normal;width:16px;text-align:center;color:var(--dim)}
 .nav:hover:not(:disabled){background:#1a1c23;color:var(--ink)}
@@ -194,11 +197,22 @@ h3{margin:0}
 
 /* modal */
 .overlay{position:fixed;inset:0;background:#000b;display:grid;place-items:center;padding:16px;z-index:20;backdrop-filter:blur(3px)}
-.modal{background:var(--panel2);border:1px solid #5a4a22;border-radius:14px;padding:24px;max-width:560px;width:100%;box-shadow:0 24px 70px #000d}
+.modal{background:var(--panel2);border:1px solid #5a4a22;border-radius:14px;padding:24px;max-width:600px;width:100%;box-shadow:0 24px 70px #000d;max-height:88vh;overflow:auto}
 .modal-h{display:flex;justify-content:space-between;align-items:center}
-.modal-lead{font-size:16px;margin:12px 0}
+.modal-title{font-size:19px;margin:10px 0 0;letter-spacing:-.01em}
+.modal-title:focus-visible{outline:2px solid #3a4c8f;outline-offset:3px}
+.modal-lead{font-size:15px;margin:8px 0 0;color:#c8cbd3}
 .mini{margin-top:12px;font-size:13px;color:#c8cbd3}.mini b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
-.mini ol{margin:0;padding-left:18px}.mini p{margin:0}
+.mini ol,.mini ul{margin:0;padding-left:18px}.mini p{margin:0}
+.mini li{margin:2px 0}
+/* Known vs uncertain sit side by side so the reader weighs them together, not in sequence. */
+.ku{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px}
+.ku .mini ul{list-style:none;padding-left:0}
+.ku .mini li{padding-left:14px;position:relative}
+.ku .mini li:before{content:'';position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--dim)}
+.safest{border-left:2px solid var(--ok);padding-left:12px;margin-top:16px}
+.safest b{color:var(--ok)}
+@media (max-width:560px){.ku{grid-template-columns:1fr;gap:4px}}
 .next{margin-top:14px;border-top:1px solid var(--line);padding-top:12px;display:grid;gap:6px;font-size:12px;color:var(--muted)}.next b{color:var(--ink);margin-right:6px}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
 .modal-actions .primary{min-width:130px}
@@ -283,3 +297,7 @@ h3{margin:0}
 .viewtoggle button.on{background:#1b2136;color:var(--ink)}
 .viewtoggle a{padding:3px 8px;font-size:12px;color:var(--muted);text-decoration:none;border-left:1px solid var(--line2)}
 .viewtoggle a:hover{color:var(--ink)}
+
+/* Report masthead — the mark travels with the exported artifact. */
+.rbrand{display:flex;align-items:center;gap:10px;color:var(--ink);margin-bottom:14px}
+.rbrand b{font-family:var(--mono);letter-spacing:.3em;font-size:14px}

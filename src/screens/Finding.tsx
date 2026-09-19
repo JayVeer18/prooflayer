@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { STATUS, hhmmss, pathOnly } from '../model';
+import { STATUS, STEP_KIND, describeStatus, hhmmss, pathOnly } from '../model';
 import { Badge } from '../ui';
 import type { A } from '../useAssessment';
 
@@ -13,7 +13,7 @@ export default function Finding({ a }: { a: A }) {
     return (
       <div className="page-body narrow">
         <h2>Evidence</h2>
-        <p className="muted">Evidence appears here once ProofLayer has tested a claim.</p>
+        <p className="muted">Evidence appears here once Argus has tested a claim.</p>
       </div>
     );
   }
@@ -26,22 +26,22 @@ export default function Finding({ a }: { a: A }) {
   const obs = steps.filter((t) => t.kind === 'observation');
 
   const chain: Array<{ k: string; title: string; body: React.ReactNode; id?: string }> = [
-    { k: 'CLAIM', title: 'Vendor claim', body: f.claim, id: f.claimId },
-    { k: 'HYPOTHESIS', title: 'Executable hypothesis', body: item?.hypothesis ?? f.test, id: f.hypothesisId },
+    { k: 'CLAIM', title: 'What the vendor claims', body: f.claim, id: f.claimId },
+    { k: 'CHECK', title: 'What we checked', body: item?.hypothesis ?? f.test, id: f.hypothesisId },
     {
-      k: 'ACTIONS', title: 'What ProofLayer did',
-      body: actions.length ? <ol>{actions.map((t) => <li key={t.id}>{t.text} <code>{t.id}</code></li>)}</ol> : item ? <ol>{item.procedure.map((p) => <li key={p}>{p}</li>)}</ol> : `${f.actionIds.length} recorded actions`,
+      k: 'STEPS', title: 'What Argus did',
+      body: actions.length ? <ol>{actions.map((t) => <li key={t.id}>{t.text}</li>)}</ol> : item ? <ol>{item.procedure.map((p) => <li key={p}>{p}</li>)}</ol> : `${f.actionIds.length} recorded steps`,
     },
-    { k: 'OBSERVATION', title: 'What was observed', body: obs.length ? <>{f.observed}<ul className="ids">{obs.map((t) => <li key={t.id}>{t.text} <code>{t.id}</code></li>)}</ul></> : f.observed },
+    { k: 'RESULT', title: 'What actually happened', body: obs.length ? <>{f.observed}<ul className="ids">{obs.map((t) => <li key={t.id}>{t.text}</li>)}</ul></> : f.observed },
     {
       k: 'EVIDENCE', title: 'Proof you can inspect',
       body: (
         <div className="evchips">
-          {shots.length > 0 && <button className="chip link" onClick={() => setTab('shots')}>Screenshot ×{shots.length}</button>}
-          <button className="chip link" onClick={() => setTab('trace')}>URL {f.evidence.route || '—'}</button>
-          {f.evidence.network.length > 0 && <button className="chip link" onClick={() => setTab('network')}>Network ×{f.evidence.network.length}</button>}
-          {f.evidence.console.length > 0 && <button className="chip link" onClick={() => setTab('console')}>Console ×{f.evidence.console.length}</button>}
-          <button className="chip link" onClick={() => setTab('trace')}>Trace {f.evidence.traceRef}</button>
+          {shots.length > 0 && <button className="chip link" onClick={() => setTab('shots')}>Screenshots ×{shots.length}</button>}
+          <button className="chip link" onClick={() => setTab('trace')}>Page visited {f.evidence.route || '—'}</button>
+          {f.evidence.network.length > 0 && <button className="chip link" onClick={() => setTab('network')}>Data sent & received ×{f.evidence.network.length}</button>}
+          {f.evidence.console.length > 0 && <button className="chip link" onClick={() => setTab('console')}>Browser messages ×{f.evidence.console.length}</button>}
+          <button className="chip link" onClick={() => setTab('trace')}>Full step record</button>
         </div>
       ),
     },
@@ -86,16 +86,16 @@ export default function Finding({ a }: { a: A }) {
 
       <div className="tabs flat">
         <nav>
-          {([['trace', 'Execution Trace'], ['shots', `Screenshots ${shots.length}`], ['network', `Network ${f.evidence.network.length}`], ['console', `Console ${f.evidence.console.length}`], ['logs', 'Logs']] as Array<[Tab, string]>).map(([k, l]) => (
+          {([['trace', 'Step-by-step record'], ['shots', `Screenshots ${shots.length}`], ['network', `Data exchanged ${f.evidence.network.length}`], ['console', `Browser messages ${f.evidence.console.length}`], ['logs', 'Full activity']] as Array<[Tab, string]>).map(([k, l]) => (
             <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
           ))}
         </nav>
         <div className="tab-body tall">
-          {tab === 'trace' && (steps.length ? steps.map((t) => <div key={t.id} className={`ln tk-${t.kind}`}><span>{t.kind}</span>{t.text}<code>{t.id}</code></div>) : <div className="muted">Detailed trace steps are not stored after a session ends. Trace reference: {f.evidence.traceRef}</div>)}
-          {tab === 'shots' && (shots.length ? <div className="shotlist">{shots.map((sh) => <figure key={sh.id}><img src={sh.src} alt={sh.label} /><figcaption>{sh.label} · {sh.route} · {hhmmss(sh.ts)} UTC</figcaption></figure>)}</div> : <div className="muted">Screenshots are not stored after a session ends.</div>)}
-          {tab === 'network' && (f.evidence.network.length ? f.evidence.network.map((n, i) => <div key={i} className={`ln ${n.flag ? 'l-warn' : ''}`}><span>{hhmmss(n.ts)}</span>{n.method} {pathOnly(n.url)} → <b>{n.status}</b> {n.flag && <em>[{n.flag}]</em>}</div>) : <div className="muted">No relevant network events for this test.</div>)}
-          {tab === 'console' && (f.evidence.console.length ? f.evidence.console.map((c, i) => <div key={i} className={`ln ${c.flag ? 'l-warn' : ''}`}><span>{hhmmss(c.ts)}</span>[{c.type}] {c.text} {c.flag && <em>[{c.flag}]</em>}</div>) : <div className="muted">No relevant console events for this test.</div>)}
-          {tab === 'logs' && (a.logs.length ? a.logs.map((l, i) => <div key={i} className={`ln l-${l.level}`}><span>{hhmmss(l.ts)}</span>{l.text}</div>) : <div className="muted">Session logs are not stored after a session ends.</div>)}
+          {tab === 'trace' && (steps.length ? steps.map((t) => <div key={t.id} className={`ln tk-${t.kind}`}><span>{STEP_KIND[t.kind] ?? t.kind}</span>{t.text}</div>) : <div className="muted">The step-by-step record is not kept after a session ends.</div>)}
+          {tab === 'shots' && (shots.length ? <div className="shotlist">{shots.map((sh) => <figure key={sh.id}><img src={sh.src} alt={sh.label} /><figcaption>{sh.label} · {sh.route} · {hhmmss(sh.ts)} UTC</figcaption></figure>)}</div> : <div className="muted">Screenshots are not kept after a session ends.</div>)}
+          {tab === 'network' && (f.evidence.network.length ? f.evidence.network.map((n, i) => <div key={i} className={`ln ${n.flag ? 'l-warn' : ''}`}><span>{hhmmss(n.ts)}</span>{pathOnly(n.url)} — <b>{describeStatus(n.status)}</b> {n.flag && <em>[{n.flag}]</em>}</div>) : <div className="muted">Nothing relevant was exchanged during this test.</div>)}
+          {tab === 'console' && (f.evidence.console.length ? f.evidence.console.map((c, i) => <div key={i} className={`ln ${c.flag ? 'l-warn' : ''}`}><span>{hhmmss(c.ts)}</span>{c.text} {c.flag && <em>[{c.flag}]</em>}</div>) : <div className="muted">The browser reported nothing relevant during this test.</div>)}
+          {tab === 'logs' && (a.logs.length ? a.logs.map((l, i) => <div key={i} className={`ln l-${l.level}`}><span>{hhmmss(l.ts)}</span>{l.text}</div>) : <div className="muted">Activity is not kept after a session ends.</div>)}
         </div>
       </div>
     </div>

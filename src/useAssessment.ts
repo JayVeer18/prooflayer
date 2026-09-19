@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { newConversationId, runProbe, streamAssess } from './api';
-import { DEFAULT_CLAIMS, loadHistory, saveHistory } from './model';
+import { DEFAULT_CLAIMS, DEMO_TARGET, loadHistory, saveHistory } from './model';
 import { streamReplay } from './replay';
 import type {
   Approval, AssessmentStatus, Claim, Complete, ConEvt, Finding, Hitl, LogLine, NetEvt, PlanItem,
@@ -18,10 +18,12 @@ export function useAssessment() {
   const replayRef = useRef(false);
 
   // Credentials live only in React memory — never localStorage, never logged.
+  // The defaults point at our own OWASP Juice Shop instance, signed in as a standard "customer"
+  // account with no administrative rights — the role the role-boundary claim is about.
   const [form, setForm] = useState({
-    targetUrl: typeof location !== 'undefined' ? `${location.origin}/demo/` : '',
-    username: 'buyer@acme-demo.test',
-    password: 'Buyer#2026',
+    targetUrl: DEMO_TARGET.url,
+    username: DEMO_TARGET.username,
+    password: DEMO_TARGET.password,
     claims: DEFAULT_CLAIMS.join('\n'),
   });
   const [busy, setBusy] = useState(false);

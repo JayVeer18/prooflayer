@@ -38,8 +38,11 @@ export interface Ctx {
   flush(): Promise<{ console: ConEvt[]; network: NetEvt[] }>;
 }
 
+// Prefer an explicitly identified account field over a generic text input. A bare input[type="text"]
+// is very often the site-wide search box in the navigation bar, and typing the username into search
+// silently breaks sign-in; it stays last as a fallback for forms that identify nothing.
 const USER_SEL =
-  'input[type="email"], input[name*="mail" i], input[name*="user" i], input[id*="mail" i], input[id*="user" i], input[type="text"]';
+  'input[type="email"], input[name*="mail" i], input[name*="user" i], input[id*="mail" i], input[id*="user" i], input[autocomplete="username"], input[type="text"]';
 const PASS_SEL = 'input[type="password"]';
 const SUBMIT_SEL = 'button[type="submit"], input[type="submit"]';
 const SUBMIT_TEXT = ['sign in', 'log in', 'login', 'continue', 'submit'];
@@ -85,16 +88,87 @@ export async function hasLoginForm(d: Driver): Promise<boolean> {
   return Boolean(await d.evaluate<boolean>(`!!document.querySelector('input[type="password"]')`));
 }
 
+/**
+ * Finds the product's sign-in form.
+ *
+ * Order matters: the landing page, then a visible "sign in" control, and only then the conventional
+ * login routes. The last step is what makes this work on single-page apps, where the sign-in link
+ * often sits inside a collapsed menu or behind a welcome overlay and cannot be clicked — concluding
+ * "this product has no authentication" in that case would silently drop every role-boundary claim.
+ */
 async function openLogin(ctx: Ctx): Promise<boolean> {
   await ctx.d.goto(ctx.target.href);
   if (await waitFor(() => hasLoginForm(ctx.d), 1800)) return true;
+
+  await dismissOverlays(ctx);
   await ctx.d.clickText(['sign in', 'log in', 'login']);
   await ctx.d.settle();
-  return waitFor(() => hasLoginForm(ctx.d), 1800);
+  if (await waitFor(() => hasLoginForm(ctx.d), 1800)) return true;
+
+  for (const route of ['#/login', 'login', 'signin', 'sign-in', 'account/login', 'users/sign_in']) {
+    let href: string;
+    try {
+      href = new URL(route, ctx.target.href).href;
+    } catch {
+      continue;
+    }
+    await ctx.d.goto(href);
+    await ctx.d.settle();
+    if (await waitFor(() => hasLoginForm(ctx.d), 1500)) {
+      ctx.log('info', `Sign-in form found at ${pathOf(href)}`);
+      await dismissOverlays(ctx);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Closes welcome banners and cookie bars. These overlay the page and swallow clicks, which stalls
+ * sign-in on many products; dismissing them is what an ordinary user does before using the app.
+ * Best-effort only — anything that fails is ignored.
+ */
+async function dismissOverlays(ctx: Ctx): Promise<void> {
+  try {
+    await ctx.d.evaluate(
+      `(function(){var sels=['[aria-label*="close" i]','[aria-label*="dismiss" i]','.cc-btn.cc-dismiss','.cookie-consent button','#cookieconsent button'];` +
+        `var n=0;sels.forEach(function(s){document.querySelectorAll(s).forEach(function(el){try{var r=el.getClientRects();if(r&&r.length){el.click();n++}}catch(e){}})});return n})()`,
+    );
+    await ctx.d.settle();
+  } catch {
+    /* overlays are incidental — never fail sign-in because one could not be dismissed */
+  }
+}
+
+/**
+ * Returns a selector for the account/username field that belongs to the sign-in form.
+ *
+ * A CSS selector list matches in document order, so `input[type="text"]` in a navigation search box
+ * wins over the real email field further down the page — the credentials then go into search and the
+ * sign-in silently fails. This marks the correct field in the page (scoped to the form that actually
+ * contains the password input) and returns a selector for that one element.
+ */
+async function accountFieldSelector(ctx: Ctx): Promise<string> {
+  const MARK = 'data-argus-account-field';
+  try {
+    const found = await ctx.d.evaluate<boolean>(
+      `(function(){` +
+        `var pw=document.querySelector('input[type="password"]');if(!pw)return false;` +
+        `var scope=pw.form||pw.closest('form,[class*="login" i],[class*="signin" i]')||document;` +
+        `var pick=scope.querySelector('input[type="email"],input[name*="mail" i],input[name*="user" i],input[id*="mail" i],input[id*="user" i],input[autocomplete="username"]');` +
+        `if(!pick){var all=Array.prototype.slice.call(scope.querySelectorAll('input[type="text"],input:not([type])'));` +
+        `pick=all.filter(function(el){return el!==pw})[0]}` +
+        `if(!pick)return false;pick.setAttribute(${JSON.stringify(MARK)},'1');return true})()`,
+    );
+    if (found) return `[${MARK}]`;
+  } catch {
+    /* fall through to the generic selector below */
+  }
+  return USER_SEL;
 }
 
 async function submitLogin(ctx: Ctx, user: string, pass: string, label?: string) {
-  await ctx.d.fill(USER_SEL, user);
+  await ctx.d.fill(await accountFieldSelector(ctx), user);
   await ctx.d.fill(PASS_SEL, pass);
   // Password fields render as dots, so this frame shows the entry without exposing the secret.
   if (label) await ctx.shot(label);
@@ -228,7 +302,7 @@ export async function authSession(ctx: Ctx, item: PlanItem): Promise<Finding> {
       testStatus: 'BLOCKED',
       severity: 'INFO',
       test: 'Sign in with provided credentials',
-      observed: 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.',
+      observed: 'SIGN-IN FAILED — the username and password provided were not accepted by the product, so no conclusion could be reached.',
       evidence: evidence(ctx, item, pathOf(landing), shots, net, con),
       recommendation: 'Confirm the test credentials are valid and re-run.',
     });
@@ -288,7 +362,7 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
       testStatus: 'BLOCKED',
       severity: 'INFO',
       test: 'Sign in as the provided standard user',
-      observed: 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.',
+      observed: 'SIGN-IN FAILED — the username and password provided were not accepted by the product, so no conclusion could be reached.',
       evidence: evidence(ctx, item, pathOf(ctx.target.href), shots, [], []),
     });
   }
@@ -296,7 +370,14 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
   const base = new URL('./', ctx.target.href);
   const hidden = ctx.surfaces.filter((s) => s.hidden && ADMINISH.test(s.path + s.name)).map((s) => new URL(s.path, ctx.target.origin).href);
   const common = ['admin/users/', 'admin/', 'admin/settings/', 'settings/roles/'].map((p) => new URL(p, base).href);
-  const candidates = [...new Set([...hidden, ...common])].slice(0, 5);
+  // Single-page apps commonly route on the URL fragment (#/administration), which never reaches the
+  // server — so a plain-path probe just returns the app shell and proves nothing either way. When the
+  // product looks like a hash-routed SPA, probe the fragment forms too. This is generic SPA support,
+  // not a route list tailored to any one product.
+  const hashCandidates = ctx.surfaces.some((s) => s.path.includes('#/'))
+    ? ['#/administration', '#/admin', '#/admin/users'].map((p) => new URL(p, base).href)
+    : [];
+  const candidates = [...new Set([...hidden, ...hashCandidates, ...common])].slice(0, 6);
   ctx.log('info', `Probing ${candidates.length} privileged routes as the standard user${hidden.length ? ` (${hidden.length} found hidden in the DOM)` : ''}`);
 
   let denied = 0;
@@ -361,13 +442,24 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
   }
 
   const test = `Signed in as a standard user, navigated directly to ${candidates.length} privileged routes`;
+
+  // A page that refuses the standard user proves the INTERFACE enforces the boundary; it does not
+  // prove the SERVER does. Access control implemented only in the client is a common real defect, so
+  // when the pages refuse, ask the product's own administrative endpoint directly, using the signed-in
+  // session. The request is issued from inside the page so it carries exactly the credentials the
+  // product itself would send — a read-only GET, no state is changed.
+  if (denied > 0) {
+    const apiProbe = await probeAdminApi(ctx, item);
+    if (apiProbe) return apiProbe;
+  }
+
   if (denied > 0 && notFound < candidates.length) {
     return finding(item, {
       status: 'SUPPORTED',
       testStatus: 'PASS',
       severity: 'INFO',
       test,
-      observed: `${denied} privileged route(s) denied the standard user (redirect or 401/403); none rendered.`,
+      observed: `${denied} administrator-only page(s) correctly turned the standard user away, and the administrative data endpoints refused the same account.`,
       evidence: evidence(ctx, item, pathOf(candidates[0]), shots, [], []),
     });
   }
@@ -376,9 +468,104 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
     testStatus: 'INCONCLUSIVE',
     severity: 'INFO',
     test,
-    observed: 'No privileged routes could be identified from the UI alone. Provide a known admin URL to test.',
+    observed: 'No administrator-only pages could be found from the product interface alone. Add a known admin page address to test this claim.',
     evidence: evidence(ctx, item, pathOf(ctx.target.href), shots, [], []),
   });
+}
+
+/**
+ * Builds the in-page script that requests `path` using whatever session the product itself holds.
+ *
+ * Cookies ride along via credentials:'include'; many single-page apps instead keep a bearer token in
+ * web storage, so that is reused when present. Without the token the probe would ask anonymously, and
+ * the resulting 401 would be mistaken for "the server enforces this boundary" — under-reporting a real
+ * exposure. Exported so tests exercise the exact string that ships, rather than a copy that can drift.
+ */
+export function adminApiProbeScript(path: string): string {
+  return (
+    "(async function(){try{" +
+    "var tok=null;" +
+    "try{" +
+    "var keys=Object.keys(localStorage).concat(Object.keys(sessionStorage));" +
+    "for(var i=0;i<keys.length;i++){" +
+    "if(!/token|jwt|auth/i.test(keys[i]))continue;" +
+    "var v=localStorage.getItem(keys[i]);if(!v)v=sessionStorage.getItem(keys[i]);if(!v)continue;" +
+    "try{var j=JSON.parse(v);var n=j&&(j.token||j.accessToken||j.access_token||j.jwt);if(typeof n==='string'&&n)v=n}catch(e){}" +
+    "if(typeof v==='string'&&v.split('.').length===3){tok=v;break}" +
+    "}}catch(e){}" +
+    "var h={'Accept':'application/json'};if(tok)h['Authorization']='Bearer '+tok;" +
+    "var r=await fetch(" + JSON.stringify(path) + ",{credentials:'include',headers:h});" +
+    // Keep enough of the body to parse a full account listing. The cap only guards against
+    // pathologically large responses; truncating mid-JSON would make a real finding unreadable.
+    "var t=await r.text();" +
+    "return{status:r.status,body:t.slice(0,200000)}" +
+    "}catch(e){return{status:0,body:''}}})()"
+  );
+}
+
+/**
+ * Asks the product's own administrative data endpoints as the signed-in standard user.
+ *
+ * Only safe, read-only GETs to conventional account-listing paths are attempted, and a result counts
+ * as a contradiction only when the response actually contains multiple account records — a 200 that
+ * returns an empty list, a login page or the app shell proves nothing and is ignored. Returns null
+ * when nothing conclusive was observed, so the caller can fall through to its normal conclusion.
+ */
+async function probeAdminApi(ctx: Ctx, item: PlanItem): Promise<Finding | null> {
+  const { d } = ctx;
+  const paths = ['/api/Users/', '/api/users', '/rest/admin/users', '/admin/api/users'];
+  for (const path of paths) {
+    ctx.log('act', `Asking ${path} directly as the standard user`);
+    ctx.trace('action', `Request ${path} using the signed-in standard-user session`, item.id);
+    let probe: { status: number; body: string } | null = null;
+    try {
+      probe = await d.evaluate<{ status: number; body: string }>(adminApiProbeScript(path));
+    } catch {
+      continue;
+    }
+    if (!probe || probe.status < 200 || probe.status >= 300) continue;
+
+    // Require real account records, not merely a 200.
+    let records: any[] = [];
+    let truncated = false;
+    try {
+      const parsed = JSON.parse(probe.body);
+      const arr = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : [];
+      records = arr.filter((r: any) => r && typeof r === 'object' && ('email' in r || 'username' in r || 'role' in r));
+    } catch {
+      // An oversized listing can arrive clipped and therefore unparseable. Rather than discard a
+      // genuine exposure, count the account-shaped fragments; the finding then reports "at least N".
+      const emails = probe.body.match(/"email"\s*:\s*"[^"]+"/g) ?? [];
+      if (emails.length < 2) continue;
+      records = emails.map(() => ({}));
+      truncated = true;
+    }
+    if (records.length < 2) continue;
+
+    const roles = truncated
+      ? [...new Set((probe.body.match(/"role"\s*:\s*"([^"]+)"/g) ?? []).map((m) => m.replace(/.*"role"\s*:\s*"/, '').replace(/"$/, '')))]
+      : [...new Set(records.map((r) => String(r.role ?? '')).filter(Boolean))];
+    const privileged = roles.filter((r) => /admin|owner|superuser|staff/i.test(r));
+    const flushed = await ctx.flush();
+    const shotId = await ctx.shot(`Account data returned to the standard user from ${path}`);
+    ctx.trace('observation', `${path} returned ${records.length} account records to a standard user`, item.id);
+    ctx.trace('evidence', `screenshot ${shotId} + GET ${path} → ${probe.status}`, item.id);
+
+    return finding(item, {
+      status: 'CONTRADICTED',
+      testStatus: 'FAIL',
+      severity: 'HIGH',
+      test: `Signed in as a standard user, requested ${path} directly`,
+      observed:
+        `The administrator page correctly refused this account, but the same signed-in standard user ` +
+        `received ${truncated ? 'at least ' : ''}${records.length} account records from ${path}. ` +
+        `${privileged.length ? `The data includes ${privileged.join(', ')} account(s). ` : ''}` +
+        `Access is enforced in the interface but not by the server, so anyone who bypasses the interface can read this data.`,
+      evidence: evidence(ctx, item, path, [shotId], flushed.network, flushed.console),
+      recommendation: 'Enforce the role check on the server for every administrative endpoint, not only on the pages that display the data.',
+    });
+  }
+  return null;
 }
 
 /* ───────────────────────────── 3. runtime signals (console / network) ───────────────────────────── */
@@ -426,7 +613,7 @@ export async function runtimeSignals(ctx: Ctx, item: PlanItem): Promise<Finding>
       severity: 'LOW',
       test,
       evidence: ev,
-      observed: `No credentials exposed, but ${conFlagged.length + netFlagged.length} runtime warning(s) were observed (${[...new Set([...conFlagged, ...netFlagged].map((x) => x.flag))].join(', ')}).`,
+      observed: `No credentials exposed, but ${conFlagged.length + netFlagged.length} warning(s) were noticed while using the product (${[...new Set([...conFlagged, ...netFlagged].map((x) => x.flag))].join(', ')}).`,
     });
   }
   return finding(item, {
@@ -435,7 +622,7 @@ export async function runtimeSignals(ctx: Ctx, item: PlanItem): Promise<Finding>
     severity: 'INFO',
     test,
     evidence: ev,
-    observed: `${f.console.length} console events and ${f.network.length} requests observed during sign-in; no credentials, errors or unexpected external calls.`,
+    observed: `${f.console.length} browser messages and ${f.network.length} exchanges recorded during sign-in; no passwords, errors or unexpected outside connections.`,
   });
 }
 
@@ -477,7 +664,7 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
       test,
       observed: !ai
         ? 'The validation could not be completed: no AI assistant surface was reachable. No conclusion was made about the vendor claim.'
-        : 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.',
+        : 'SIGN-IN FAILED — the username and password provided were not accepted by the product, so no conclusion could be reached.',
       evidence: evidence(ctx, item, '', shots, [], []),
     });
   }
@@ -503,7 +690,7 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
     `(function(){var els=document.querySelectorAll('[data-testid*="payload" i],[id*="payload" i],[data-testid*="model-input" i],[id*="model-input" i]');var best=null;els.forEach(function(el){var t=(el.innerText||el.textContent||'').trim();if(best===null||t.length>best.length)best=t;});return best})()`,
   );
   const outbound = outboundRaw !== null && outboundRaw.length >= 12 ? outboundRaw : null;
-  shots.push(await ctx.shot('Assistant response and outbound payload'));
+  shots.push(await ctx.shot('Assistant reply and what was sent'));
   const route = pathOf(await d.url());
 
   if (outbound === null) {
@@ -512,7 +699,7 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
       testStatus: 'INCONCLUSIVE',
       severity: 'INFO',
       test,
-      observed: 'The product does not expose what is sent to the model, so masking cannot be confirmed from the UI alone.',
+      observed: 'The product does not expose what is sent to the model, so we cannot confirm from the interface alone whether the details were hidden.',
       evidence: evidence(ctx, item, route, shots, f.network, f.console),
       recommendation: 'Request model-gateway request logs or architecture documentation from the vendor.',
     });
@@ -528,7 +715,7 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
     return finding(item, { status: 'SUPPORTED', testStatus: 'PASS', severity: 'INFO', test, evidence: ev, observed: `All ${present.length} synthetic sensitive values were masked before reaching the model.` });
   }
   if (masked.length === 0) {
-    return finding(item, { status: 'CONTRADICTED', testStatus: 'FAIL', severity: 'HIGH', test, evidence: ev, observed: `None of the synthetic sensitive values were masked; ${leaked.map((l) => l.name).join(', ')} reached the model in clear text.` });
+    return finding(item, { status: 'CONTRADICTED', testStatus: 'FAIL', severity: 'HIGH', test, evidence: ev, observed: `None of the synthetic sensitive values were masked; ${leaked.map((l) => l.name).join(', ')} reached the AI model unprotected.` });
   }
   return finding(item, {
     status: 'PARTIALLY_VERIFIED',
@@ -536,7 +723,7 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
     severity: 'MEDIUM',
     test,
     evidence: ev,
-    observed: `Masked: ${masked.map((m) => m.name).join(', ')}. NOT masked: ${leaked.map((l) => l.name).join(', ')} — sent to the model in clear text.`,
+    observed: `Masked: ${masked.map((m) => m.name).join(', ')}. NOT masked: ${leaked.map((l) => l.name).join(', ')} — sent to the AI model unprotected.`,
     recommendation: 'Extend the redaction rules to cover all regulated identifiers (SSN/national ID, health and financial data).',
   });
 }
@@ -549,11 +736,11 @@ const UNVERIFIABLE: Record<string, { why: string; evidence: string[] }> = {
     evidence: ['Vendor architecture documentation', 'Data-processing agreement', 'Model-provider data policy'],
   },
   audit: {
-    why: 'No audit-log surface was reachable for this role, so ProofLayer cannot confirm what actions are recorded.',
+    why: 'No audit-log surface was reachable for this role, so Argus cannot confirm what actions are recorded.',
     evidence: ['Admin-role walkthrough of the audit log', 'Sample audit-log export', 'Retention policy'],
   },
   other: {
-    why: 'This claim is not something ProofLayer can test through the product interface.',
+    why: 'This claim is not something Argus can test through the product interface.',
     evidence: ['Vendor documentation', 'Independent audit report'],
   },
 };

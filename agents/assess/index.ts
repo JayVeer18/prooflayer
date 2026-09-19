@@ -1,5 +1,5 @@
 /**
- * POST /assess — ProofLayer assessment stream (Server-Sent Events)
+ * POST /assess — Argus assessment stream (Server-Sent Events)
  *
  * Body:
  *   { action: 'plan',    targetUrl, username, password, claims? }

@@ -31,9 +31,26 @@ export interface Finding {
 export interface Shot { id: string; label: string; route: string; ts: string; src: string }
 export interface LogLine { ts: string; level: 'info' | 'ok' | 'warn' | 'act'; text: string }
 export interface TraceStep { id: string; kind: string; text: string; ts: string; ref?: string }
+/**
+ * A risk-aware interruption object, not a binary permission prompt. The extra fields carry the
+ * approval anatomy the design spec requires: what could change, what is known vs uncertain, and
+ * the safest non-destructive alternative — so the reviewer can judge the action before it runs.
+ * All are optional: the orchestrator fills what it can establish and the modal omits the rest
+ * rather than inventing reassurance it cannot support.
+ */
 export interface Hitl {
   id: string; kind: string; title: string; body: string; expected?: string; defaultPayload?: string;
   risk?: Risk; procedure?: string[]; ifApproved?: string; ifSkipped?: string;
+  /** Why this action advances the current hypothesis. */
+  why?: string;
+  /** Side effects and reversibility, in the product's own terms. */
+  couldChange?: string;
+  /** Established facts about the action's blast radius. */
+  known?: string[];
+  /** What the agent cannot establish before acting. */
+  uncertain?: string[];
+  /** The non-destructive alternative, offered first. */
+  safestOption?: string;
 }
 export interface Complete { counts: Record<string, number>; narrative: string; source: string; total: number; heroId: string | null }
 export interface Approval { decision: 'run' | 'skip'; payload?: string }

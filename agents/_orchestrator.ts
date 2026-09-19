@@ -1,5 +1,5 @@
 /**
- * ProofLayer orchestrator — private module.
+ * Argus orchestrator — private module.
  *
  * One orchestrator, clear phases:  PLAN → (human review) → EXECUTE → (human approval) → PROVE
  * Each call to /assess runs ONE segment and ends at the next human checkpoint. The sandbox browser
@@ -36,14 +36,14 @@ export function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim
       return {
         title: 'Role boundary enforcement',
         hypothesis: 'A standard user cannot access administrative functionality.',
-        expected: 'Standard user is denied (redirect, 401 or 403) on every privileged route.',
+        expected: 'The standard user is turned away from every administrator-only page.',
         rationale: 'Role-based access claims are testable by direct navigation and hidden-control discovery.',
         priority: 'high',
         procedure: [
           'Authenticate as a standard user',
           'Discover administrative routes (visible and hidden controls)',
           'Navigate directly to each privileged surface',
-          'Observe the authorization response (redirect, 401/403, or rendered page)',
+          'Note whether the page was blocked or opened',
           'Capture evidence',
         ],
         risk: 'SAFE',
@@ -75,7 +75,7 @@ export function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim
       return {
         title: 'AI sensitive-data protection',
         hypothesis: 'Sensitive identifiers submitted to the AI assistant are masked before they are sent to the model.',
-        expected: 'SSN, card number and email are masked in the outbound payload.',
+        expected: 'The ID number, card number and email are hidden before they reach the AI model.',
         rationale: 'Submitting synthetic sensitive data is observable and safe, but it sends data to another system — so it needs your approval first.',
         priority: 'high',
         procedure: ['Open the AI assistant', 'Submit synthetic sensitive data (fake SSN, card number, email) — needs your approval', 'Inspect what is sent to the model'],
@@ -87,7 +87,7 @@ export function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim
         title: claim.key === 'audit' ? 'Audit trail (observability check)' : 'Documentation-backed claim',
         hypothesis: 'Assess whether this claim can be observed through the product interface.',
         expected: 'Claim is either verifiable through product behavior or explicitly reported as not verifiable.',
-        rationale: 'Some claims cannot be proven from the outside; ProofLayer says so instead of guessing.',
+        rationale: 'Some claims cannot be proven from the outside; Argus says so instead of guessing.',
         priority: 'low',
         procedure: ['Check whether the claim is observable through the product interface', 'If it is not, report NOT VERIFIED and recommend the evidence to request'],
         risk: 'SAFE',
@@ -244,7 +244,7 @@ export async function runPlan(io: Io): Promise<void> {
       requiresAuth = false;
       log('ok', 'No sign-in form was found — this product does not appear to require authentication');
     } else if (authOutcome === 'failed') {
-      emit('error', { kind: 'auth', message: 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.' });
+      emit('error', { kind: 'auth', message: 'SIGN-IN FAILED — the username and password provided were not accepted by the product, so no conclusion could be reached.' });
       return;
     } else {
       await ctx.shot('Signed in');
@@ -254,7 +254,11 @@ export async function runPlan(io: Io): Promise<void> {
 
     /* ── discover ── */
     emit('phase', { phase: 'discover', label: 'Mapping product surfaces' });
-    const links = await d.evaluate<Array<{ text: string; href: string; hidden: boolean }>>(`(function(){var out=[];document.querySelectorAll('a[href]').forEach(function(a){var h=a.getAttribute('href');if(!h||h[0]==='#'||/^(mailto|tel|javascript):/i.test(h))return;var r=a.getClientRects();var cs=getComputedStyle(a);var hid=!(r&&r.length)||cs.visibility==='hidden'||cs.display==='none';out.push({text:(a.innerText||a.textContent||'').trim(),href:a.href,hidden:hid});});return out;})()`);
+    // Collect real navigation targets. A bare "#" or "#section" is a same-page anchor and is skipped,
+    // but "#/route" is how single-page apps express routing, so those are kept — without this, a
+    // hash-routed product looks like it has no surfaces at all. Angular/Vue routerLink attributes are
+    // read too, since those elements often carry no href until the framework hydrates them.
+    const links = await d.evaluate<Array<{ text: string; href: string; hidden: boolean }>>(`(function(){var out=[];var push=function(el,h){if(!h)return;if(/^(mailto|tel|javascript):/i.test(h))return;if(h[0]==='#'&&h.indexOf('#/')!==0)return;var r=el.getClientRects();var cs=getComputedStyle(el);var hid=!(r&&r.length)||cs.visibility==='hidden'||cs.display==='none';var abs;try{abs=new URL(h,location.href).href}catch(e){return}out.push({text:(el.innerText||el.textContent||'').trim(),href:abs,hidden:hid})};document.querySelectorAll('a[href]').forEach(function(a){push(a,a.getAttribute('href'))});document.querySelectorAll('[routerLink]').forEach(function(a){var v=a.getAttribute('routerLink');if(v)push(a,v[0]==='/'?'#'+v:'#/'+v)});return out;})()`);
     const seen = new Set<string>();
     const surfaces: Surface[] = [];
     for (const l of links) {
@@ -264,9 +268,12 @@ export async function runPlan(io: Io): Promise<void> {
       } catch {
         continue;
       }
-      if (u.origin !== target.origin || seen.has(u.pathname)) continue;
-      seen.add(u.pathname);
-      surfaces.push({ name: l.text || u.pathname, path: u.pathname, hidden: l.hidden });
+      // The fragment is part of the route in a hash-routed app, so it belongs in the identity of a
+      // surface; for ordinary apps `u.hash` is empty and this behaves exactly as before.
+      const route = u.pathname + (u.hash.startsWith('#/') ? u.hash : '');
+      if (u.origin !== target.origin || seen.has(route)) continue;
+      seen.add(route);
+      surfaces.push({ name: l.text || route, path: route, hidden: l.hidden });
     }
 
     let visited = 0;
@@ -314,7 +321,7 @@ export async function runPlan(io: Io): Promise<void> {
 
     const llm = await llmJSON<{ items: Array<Partial<PlanItem> & { claimId: string }> }>(
       env,
-      'You are the planning module of ProofLayer, a buyer-side product-assurance assistant. Reply with ONLY a JSON object.',
+      'You are the planning module of Argus, a buyer-side product-assurance assistant. Reply with ONLY a JSON object.',
       JSON.stringify({
         task: 'For each claim write concise externally-testable wording. Return {"items":[{"claimId","title","hypothesis","expected","rationale"}]}. title<=7 words, hypothesis/expected one sentence each, rationale<=14 words. Do not add or remove claims.',
         surfaces: surfaces.filter((s) => !s.hidden).map((s) => s.name || s.path),
@@ -384,7 +391,7 @@ export async function runExecute(io: Io): Promise<void> {
       if (g === 'skip' || g === 'blocked') {
         const f =
           g === 'blocked'
-            ? withoutRun(ctx, item, 'NEEDS_HUMAN_REVIEW', 'BLOCKED', 'Blocked by the ProofLayer safety policy: payments, destructive or mass operations, and anything outside the assessment scope are never executed.')
+            ? withoutRun(ctx, item, 'NEEDS_HUMAN_REVIEW', 'BLOCKED', 'Blocked by the Argus safety policy: payments, destructive or mass operations, and anything outside the assessment scope are never executed.')
             : withoutRun(ctx, item, 'NOT_VERIFIED', 'SKIPPED', item.enabled ? 'The reviewer chose not to run this validation, so the claim remains unverified.' : 'Removed from the plan by the reviewer.', approvals[item.id]);
         findings.push(f);
         emit('test', { id: item.id, status: f.testStatus, title: item.title });
@@ -396,12 +403,24 @@ export async function runExecute(io: Io): Promise<void> {
         emit('hitl', {
           id: item.id,
           kind: 'test_approval',
-          title: 'Human review required',
+          title: 'Submit synthetic sensitive data to the AI assistant?',
           risk: effectiveRisk(item),
           body: `The next test submits synthetic sensitive data (a fake SSN, card number and email) to the product's AI assistant, to check what is sent to the model. Claim: “${item.claim}”.`,
+          why: 'The claim can only be checked by observing what actually leaves the browser. Reading the interface cannot show whether values are masked before they reach the model.',
+          couldChange: 'The product receives a new assistant message containing the synthetic values, and may retain it in its own conversation history. Nothing is deleted or modified, and no real customer data is involved.',
+          known: [
+            'Every value submitted is fabricated and matches no real person.',
+            'The request stays within the assessment scope and target host.',
+            'Argus records exactly what was sent, whatever the result.',
+          ],
+          uncertain: [
+            'Whether the vendor stores or forwards the message after this session.',
+            'Whether an operator sees the submission in the product’s own logs.',
+          ],
+          safestOption: 'Skip this test. The claim stays NOT VERIFIED and nothing is submitted.',
           procedure: item.procedure,
           expected: item.expected,
-          ifApproved: 'ProofLayer submits the synthetic data, observes the outbound payload and records the result.',
+          ifApproved: 'Argus submits the made-up details, checks exactly what reaches the AI model, and records the result.',
           ifSkipped: 'The claim stays NOT VERIFIED and nothing is submitted.',
           defaultPayload: DEFAULT_AI_PAYLOAD,
         });

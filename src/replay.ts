@@ -1,7 +1,7 @@
 /**
  * Recorded-run replay — the demo-day safety net.
  *
- * public/replay/acme-run.json is a real recording of the orchestrator (scripts/local-run.ts --record)
+ * public/replay/demo-run.json is a real recording of the orchestrator (scripts/local-run.ts --record)
  * against the demo target. Replay feeds it through the exact same event handler as a live run,
  * including the human-approval pause, so the whole UI behaves identically.
  */
@@ -17,7 +17,7 @@ let cache: { segments: Rec[][] } | null = null;
 
 export async function load() {
   if (!cache) {
-    const res = await fetch('/replay/acme-run.json');
+    const res = await fetch('/replay/demo-run.json');
     if (!res.ok) throw new Error('Recorded run is not available');
     cache = await res.json();
   }

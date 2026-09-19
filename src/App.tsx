@@ -7,6 +7,7 @@ import { Assessments, Library, Settings } from './screens/Others';
 import Plan from './screens/Plan';
 import Report from './screens/Report';
 import Results from './screens/Results';
+import { ArgusMark } from './ui';
 import { useAssessment, type A } from './useAssessment';
 import type { Route } from './types';
 
@@ -27,8 +28,8 @@ function Sidebar({ a }: { a: A }) {
   );
   return (
     <aside className="sidebar">
-      <button className="brand" onClick={() => a.setRoute('landing')}>
-        <b>PROOFLAYER</b>
+      <button className="brand" onClick={() => a.setRoute('landing')} aria-label="Argus — go to home">
+        <span className="brand-top"><ArgusMark size={22} /><b>ARGUS</b></span>
         <span>Executable due diligence</span>
       </button>
       <nav>{MAIN.map(([r, i, l]) => item(r, i, l))}</nav>

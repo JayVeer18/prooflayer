@@ -1,45 +1,84 @@
 import { useEffect, useRef, useState } from 'react';
-import { STATUS, hhmmss, pathOnly } from '../model';
+import { STATUS, describeStatus, hhmmss, pathOnly } from '../model';
 import { Badge, BrowserFrame, PlatformStrip, Stepper } from '../ui';
 import type { A } from '../useAssessment';
 
 type Tab = 'activity' | 'network' | 'console' | 'claims' | 'evidence';
 
+/**
+ * Approval is an interruption object, not an Allow/Deny prompt: it states what will happen, why,
+ * what could change, and what remains uncertain, then offers the safest option first. Nothing here
+ * is pre-selected — Escape does not approve, and focus lands on the heading rather than a button,
+ * so a reflexive keypress cannot consent on the reviewer's behalf.
+ */
 function HitlModal({ a }: { a: A }) {
   const h = a.hitl!;
   const [modify, setModify] = useState(false);
   const [payload, setPayload] = useState(h.defaultPayload ?? '');
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, []);
+  // Escape closes nothing: the run stays paused until an explicit decision is recorded.
+  useEffect(() => {
+    const stop = (e: KeyboardEvent) => { if (e.key === 'Escape') e.stopPropagation(); };
+    window.addEventListener('keydown', stop, true);
+    return () => window.removeEventListener('keydown', stop, true);
+  }, []);
+
   return (
-    <div className="overlay" role="dialog" aria-modal="true" aria-label="Human review required">
+    <div className="overlay" role="alertdialog" aria-modal="true" aria-labelledby="hitl-title" aria-describedby="hitl-body">
       <div className="modal">
         <div className="modal-h">
-          <span className="eyebrow warn">Human review required</span>
+          <span className="eyebrow warn">Paused before action</span>
           <span className={`risk r-${h.risk ?? 'REVIEW'}`}>{h.risk ?? 'REVIEW'}</span>
         </div>
-        <p className="modal-lead">{h.body}</p>
+        <h3 id="hitl-title" ref={heading} tabIndex={-1} className="modal-title">{h.title}</h3>
+        <p id="hitl-body" className="modal-lead">{h.body}</p>
+
+        {h.why && <div className="mini"><b>Why</b><p>{h.why}</p></div>}
         {h.procedure && (
           <div className="mini">
-            <b>Planned action</b>
+            <b>What will happen</b>
             <ol>{h.procedure.map((s) => <li key={s}>{s}</li>)}</ol>
           </div>
         )}
-        <div className="mini"><b>Recommended safety</b><p>Synthetic values only — no real customer data leaves this session.</p></div>
+        {h.couldChange && <div className="mini"><b>What could change</b><p>{h.couldChange}</p></div>}
+
+        {(h.known?.length || h.uncertain?.length) && (
+          <div className="ku">
+            {h.known?.length ? (
+              <div className="mini"><b>Known</b><ul>{h.known.map((k) => <li key={k}>{k}</li>)}</ul></div>
+            ) : null}
+            {h.uncertain?.length ? (
+              <div className="mini"><b>Uncertain</b><ul>{h.uncertain.map((u) => <li key={u}>{u}</li>)}</ul></div>
+            ) : null}
+          </div>
+        )}
+
+        <div className="mini safest">
+          <b>Safest option</b>
+          <p>{h.safestOption ?? h.ifSkipped ?? 'Skip this test and continue the assessment without it.'}</p>
+        </div>
+
         {modify && (
           <label className="mini">
             <b>Synthetic data to submit</b>
             <textarea rows={3} value={payload} onChange={(e) => setPayload(e.target.value)} />
           </label>
         )}
+
         <div className="next">
           <div><b>If you approve</b> {h.ifApproved}</div>
           <div><b>If you skip</b> {h.ifSkipped}</div>
         </div>
         {a.replay && <p className="fine left">Replay mode: the recorded outcome plays regardless of this choice.</p>}
+
+        {/* Safest choice first; approval is last and never pre-focused. */}
         <div className="modal-actions">
-          <button className="ghost" onClick={() => a.decide('skip')}>Skip</button>
-          <button className="ghost" onClick={() => setModify((m) => !m)}>{modify ? 'Use default' : 'Modify'}</button>
-          <button className="primary lg" onClick={() => a.decide('run', modify ? payload : undefined)}>Approve</button>
+          <button className="ghost" onClick={() => a.decide('skip')}>Skip this test</button>
+          <button className="ghost" onClick={() => setModify((m) => !m)}>{modify ? 'Use default data' : 'Modify data'}</button>
+          <button className="primary lg" onClick={() => a.decide('run', modify ? payload : undefined)}>Approve once</button>
         </div>
+        <p className="fine left">Your decision, the time and whether the data was modified are recorded with the finding.</p>
       </div>
     </div>
   );
@@ -59,9 +98,9 @@ function ResultCard({ a }: { a: A }) {
       </dl>
       <div className="rc-ev">
         <b>Evidence captured</b>
-        <span>✓ Screenshot</span><span>✓ URL</span>
-        {f.evidence.network.length > 0 && <span>✓ Network event</span>}
-        <span>✓ Execution trace</span>
+        <span>✓ Screenshot</span><span>✓ Page visited</span>
+        {f.evidence.network.length > 0 && <span>✓ Data exchanged</span>}
+        <span>✓ Step-by-step record</span>
       </div>
       <div className="rc-actions">
         <button className="ghost sm" onClick={() => a.setResultCard(null)}>Continue</button>
@@ -87,7 +126,7 @@ export default function Live({ a }: { a: A }) {
   const enabled = a.plan.filter((p) => p.enabled).length;
   const actions = a.logs.filter((l) => l.level !== 'info' || /^Test \d/.test(l.text)).slice(-14);
   const tabs: Array<[Tab, string]> = [
-    ['activity', 'Activity'], ['network', `Network ${a.net.length}`], ['console', `Console ${a.con.length}`],
+    ['activity', 'Activity'], ['network', `Data exchanged ${a.net.length}`], ['console', `Browser messages ${a.con.length}`],
     ['claims', `Claims ${a.claims.length}`], ['evidence', `Evidence ${Object.keys(a.shots).length}`],
   ];
 
@@ -106,7 +145,8 @@ export default function Live({ a }: { a: A }) {
       <div className="livegrid">
         <section className="browser-col" aria-label="Live target">
           <BrowserFrame
-            url={cur ? `${a.replay ? 'acmedesk.demo' : new URL(a.form.targetUrl || location.href, location.href).host}${cur.route}` : ''}
+            /* The recording carries the tested product's real host, so replay shows its own address. */
+            url={cur ? `${new URL(a.form.targetUrl || location.href, location.href).host}${cur.route}` : ''}
             badge={
               <>
                 {running && <span className="nowtest">Testing: {running.title}</span>}
@@ -168,8 +208,8 @@ export default function Live({ a }: { a: A }) {
         </nav>
         <div className="tab-body">
           {tab === 'activity' && <>{a.logs.map((l, i) => <div key={i} className={`ln l-${l.level}`}><span>{hhmmss(l.ts)}</span>{l.text}</div>)}<div ref={end} /></>}
-          {tab === 'network' && (a.net.length ? a.net.map((n, i) => <div key={i} className={`ln ${n.flag ? 'l-warn' : ''}`}><span>{hhmmss(n.ts)}</span>{n.method} {pathOnly(n.url)} → <b>{n.status}</b> {n.flag && <em>[{n.flag}]</em>}</div>) : <div className="muted">No requests captured yet.</div>)}
-          {tab === 'console' && (a.con.length ? a.con.map((c, i) => <div key={i} className={`ln ${c.flag ? 'l-warn' : ''}`}><span>{hhmmss(c.ts)}</span>[{c.type}] {c.text} {c.flag && <em>[{c.flag}]</em>}</div>) : <div className="muted">No console output captured yet.</div>)}
+          {tab === 'network' && (a.net.length ? a.net.map((n, i) => <div key={i} className={`ln ${n.flag ? 'l-warn' : ''}`}><span>{hhmmss(n.ts)}</span>{pathOnly(n.url)} — <b>{describeStatus(n.status)}</b> {n.flag && <em>[{n.flag}]</em>}</div>) : <div className="muted">Nothing exchanged with the product yet.</div>)}
+          {tab === 'console' && (a.con.length ? a.con.map((c, i) => <div key={i} className={`ln ${c.flag ? 'l-warn' : ''}`}><span>{hhmmss(c.ts)}</span>{c.text} {c.flag && <em>[{c.flag}]</em>}</div>) : <div className="muted">The browser has reported nothing yet.</div>)}
           {tab === 'claims' && a.claims.map((c) => {
             const f = a.findings.find((x) => x.claimId === c.id);
             return <div key={c.id} className="ln"><span>{c.source}</span>{c.text} {f ? <Badge status={f.status} /> : <em>pending</em>}</div>;

@@ -38,7 +38,7 @@ export function Library({ a }: { a: A }) {
     <div className="page-body narrow">
       <div className="eyebrow">Claim library</div>
       <h2>Claim Library</h2>
-      <p className="muted">Common vendor claims ProofLayer can turn into executable tests. Add any of them to a new assessment.</p>
+      <p className="muted">Common vendor claims Argus can turn into executable tests. Add any of them to a new assessment.</p>
       <div className="libgrid">
         {Object.entries(CLAIM_TEMPLATES).filter(([, v]) => v.length).map(([cat, claims]) => (
           <section key={cat} className="libcard">
@@ -84,7 +84,7 @@ export function Settings({ a }: { a: A }) {
 
       <section className="setcard">
         <h3>Platform self-test</h3>
-        <p className="muted">Checks the EdgeOne Makers capabilities ProofLayer depends on.</p>
+        <p className="muted">Checks the EdgeOne Makers capabilities Argus depends on.</p>
         <button className="ghost" onClick={a.runSelfTest} disabled={p?.running}>{p?.running ? 'Checking…' : 'Run self-test'}</button>
         {p && !p.running && (
           <div className="probe">

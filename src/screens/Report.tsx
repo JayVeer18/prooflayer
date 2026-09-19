@@ -1,10 +1,10 @@
-import { STATUS, groupByClaim, hhmmss } from '../model';
-import { Badge } from '../ui';
+import { STATUS, STEP_KIND, groupByClaim, hhmmss } from '../model';
+import { ArgusMark, Badge } from '../ui';
 import type { A } from '../useAssessment';
 
 function download(a: A) {
   const body = {
-    tool: 'ProofLayer',
+    tool: 'ARGUS',
     type: 'Evidence-backed behavioral assessment (not a certification)',
     generatedAt: new Date().toISOString(),
     product: a.form.targetUrl,
@@ -16,7 +16,7 @@ function download(a: A) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' }));
   const el = document.createElement('a');
   el.href = url;
-  el.download = 'prooflayer-assessment.json';
+  el.download = 'argus-assessment.json';
   el.click();
   URL.revokeObjectURL(url);
 }
@@ -45,9 +45,10 @@ export default function Report({ a }: { a: A }) {
         <button className="primary" onClick={() => download(a)}>Export Assessment</button>
       </div>
 
+      <div className="rbrand"><ArgusMark size={26} /><b>ARGUS</b></div>
       <div className="eyebrow">Assessment report</div>
       <h2>Evidence-backed behavioral assessment</h2>
-      <p className="fine left">This is not a certification. It records what ProofLayer observed while using the product on the date below.</p>
+      <p className="fine left">This is not a certification. It records what Argus observed while using the product on the date below.</p>
 
       <dl className="rmeta">
         <dt>Product</dt><dd>{host}{a.replay ? ' · recorded run of the demo target' : ''}</dd>
@@ -67,7 +68,7 @@ export default function Report({ a }: { a: A }) {
             <header><Badge status={f.status} /><b>{f.title}</b><span className="muted">“{f.claim}”</span></header>
             <p><b>Expected</b> {f.expected}</p>
             <p><b>Observed</b> {f.observed}</p>
-            <p className="fine left">Evidence: {f.evidence.route || 'n/a'} · {hhmmss(f.evidence.timestamp)} UTC · trace {f.evidence.traceRef} · {STATUS[f.status].blurb}</p>
+            <p className="fine left">Evidence: {f.evidence.route || 'not applicable'} · {hhmmss(f.evidence.timestamp)} UTC · record {f.evidence.traceRef} · {STATUS[f.status].blurb}</p>
             {shot && <img src={shot.src} alt={shot.label} />}
           </article>
         );
@@ -88,8 +89,8 @@ export default function Report({ a }: { a: A }) {
 
       {a.trace.length > 0 && (
         <>
-          <h3 className="sect">Execution trace</h3>
-          <div className="tracebox">{a.trace.map((t) => <div key={t.id} className={`ln tk-${t.kind}`}><span>{t.kind}</span>{t.text}</div>)}</div>
+          <h3 className="sect">Step-by-step record</h3>
+          <div className="tracebox">{a.trace.map((t) => <div key={t.id} className={`ln tk-${t.kind}`}><span>{STEP_KIND[t.kind] ?? t.kind}</span>{t.text}</div>)}</div>
         </>
       )}
     </div>

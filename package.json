@@ -9,8 +9,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "dev:agents": "edgeone makers dev",
-    "test:local": "tsx scripts/local-run.ts",
-    "record": "tsx scripts/local-run.ts --record",
+    "test:local": "tsx --env-file-if-exists=.env scripts/local-run.ts",
+    "record": "tsx --env-file-if-exists=.env scripts/local-run.ts --record",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {

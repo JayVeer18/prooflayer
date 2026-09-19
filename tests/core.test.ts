@@ -8,6 +8,7 @@ import type { Driver } from '../agents/_driver';
 import { buildClaims, claimKey, templateFor } from '../agents/_claims';
 import { defaults, linkFinding } from '../agents/_orchestrator';
 import { effectiveRisk, gate } from '../agents/_policy';
+import { adminApiProbeScript } from '../agents/_tests';
 import { canTransition, transition } from '../agents/_state';
 import { authSession, rbacDirectNav, unverifiable, type Ctx } from '../agents/_tests';
 import type { NetEvt, PlanItem } from '../agents/_types';
@@ -131,7 +132,7 @@ test('claim → hypothesis: an RBAC claim becomes an executable hypothesis with 
   assert.match(item.hypothesis, /standard user cannot access administrative/i);
   assert.ok(item.procedure.length >= 4);
   assert.ok(item.procedure.some((s) => /navigate directly/i.test(s)));
-  assert.match(item.expected, /denied/i);
+  assert.match(item.expected, /turned away|denied/i);
   assert.equal(item.risk, 'SAFE');
 });
 
@@ -168,8 +169,8 @@ test('failure behaviour: bad credentials → INCONCLUSIVE with an explicit "no c
   const item = { ...rbacItem(), id: 't2', template: 'auth_session' as const };
   const f = await authSession(mkCtx(d), item);
   assert.equal(f.status, 'INCONCLUSIVE');
-  assert.match(f.observed, /AUTHENTICATION FAILED/);
-  assert.match(f.observed, /No assessment conclusion was made/);
+  assert.match(f.observed, /SIGN-IN FAILED/);
+  assert.match(f.observed, /no conclusion could be reached/i);
 });
 
 test('honesty: an unverifiable claim is NOT_VERIFIED with recommended evidence, never a guess', () => {
@@ -250,7 +251,7 @@ test('optional auth: a product with no login form is NOT_VERIFIED/SKIPPED for se
   const f = await authSession(mkCtx(d, { user: '', pass: '' }), item);
   assert.equal(f.status, 'NOT_VERIFIED');
   assert.equal(f.testStatus, 'SKIPPED');
-  assert.doesNotMatch(f.observed, /AUTHENTICATION FAILED/);
+  assert.doesNotMatch(f.observed, /SIGN-IN FAILED/);
   assert.match(f.observed, /does not appear to require authentication|no sign-in form/i);
 });
 
@@ -259,7 +260,7 @@ test('optional auth: an RBAC claim on a no-auth product is skipped as not applic
   const f = await rbacDirectNav(mkCtx(d, { user: '', pass: '' }), rbacItem());
   assert.equal(f.status, 'NOT_VERIFIED');
   assert.equal(f.testStatus, 'SKIPPED');
-  assert.doesNotMatch(f.observed, /AUTHENTICATION FAILED/);
+  assert.doesNotMatch(f.observed, /SIGN-IN FAILED/);
 });
 
 test('optional auth: wrong credentials on a product that DOES have a login form still fail honestly', async () => {
@@ -267,5 +268,24 @@ test('optional auth: wrong credentials on a product that DOES have a login form 
   const item = { ...rbacItem(), id: 't2', template: 'auth_session' as const };
   const f = await authSession(mkCtx(d, { user: 'buyer@x.test', pass: 'wrong' }), item);
   assert.equal(f.status, 'INCONCLUSIVE');
-  assert.match(f.observed, /AUTHENTICATION FAILED/);
+  assert.match(f.observed, /SIGN-IN FAILED/);
+});
+
+/* ───────────────────────── 7. server-side authorization probe ───────────────────────── */
+
+test('admin API probe: sends the product’s own bearer token, not an anonymous request', () => {
+  const s = adminApiProbeScript('/api/Users/');
+  // Without reusing the session the server answers 401 and a real exposure reads as "enforced".
+  assert.match(s, /Authorization/);
+  assert.match(s, /localStorage/);
+  assert.match(s, /credentials:'include'/);
+  assert.match(s, /"\/api\/Users\/"/);
+});
+
+test('admin API probe: keeps enough of the body to parse a full account listing', () => {
+  // Regression: a 4000-char cap truncated a 6.9KB listing mid-JSON, so the parse threw and a real
+  // CONTRADICTED finding was silently dropped.
+  const m = adminApiProbeScript('/api/Users/').match(/slice\(0,(\d+)\)/);
+  assert.ok(m, 'probe script should cap the body length');
+  assert.ok(Number(m![1]) >= 100000, `body cap ${m![1]} is too small to hold an account listing`);
 });

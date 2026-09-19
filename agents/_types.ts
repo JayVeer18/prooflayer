@@ -1,4 +1,4 @@
-/** Shared types for the ProofLayer orchestrator (private module — not a route). */
+/** Shared types for the Argus orchestrator (private module — not a route). */
 
 export type ClaimStatus =
   | 'UNTESTED'
@@ -51,7 +51,7 @@ export interface PlanItem {
   expected: string;
   rationale: string;
   priority: 'high' | 'medium' | 'low';
-  /** Ordered actions ProofLayer will take — shown to the human before anything runs. */
+  /** Ordered actions Argus will take — shown to the human before anything runs. */
   procedure: string[];
   risk: Risk;
   requiresApproval: boolean;

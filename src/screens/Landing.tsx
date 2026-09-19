@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
+import { DEMO_TARGET } from '../model';
 import { load } from '../replay';
 import { BrowserFrame } from '../ui';
 import type { A } from '../useAssessment';
 
+const DEMO_HOST = (() => { try { return new URL(DEMO_TARGET.url).host } catch { return 'demo' } })();
+
 const STAGES = [
   { k: 'CLAIM', t: 'Vendor claim', d: 'Enterprise-grade role-based access control' },
   { k: 'EXECUTE', t: 'Agent uses the product', d: 'Signs in as a standard user and navigates' },
-  { k: 'OBSERVE', t: 'Observed behavior', d: 'The admin page is accessible' },
+  { k: 'OBSERVE', t: 'Observed behavior', d: 'Account data is returned to a standard user' },
   { k: 'PROVE', t: 'Evidence-backed conclusion', d: 'CLAIM CONTRADICTED' },
 ];
 
@@ -28,17 +31,18 @@ function LandingVisual() {
     return {
       login: by((l) => l === 'Target loaded'),
       dash: by((l) => l === 'Signed in'),
-      admin: by((l) => l.startsWith('Standard user reached')),
+      admin: by((l) => l.startsWith('Standard user reached') || l.startsWith('Account data returned')),
       toSrc: src,
     };
   }, [rec]);
 
   const cur = [frames.login, frames.dash, frames.admin, frames.admin][stage];
-  const route = ['/demo/login/', '/demo/dashboard/', '/demo/admin/users/', '/demo/admin/users/'][stage];
+  // Show each frame's own recorded route, so the address bar matches the evidence on screen.
+  const route = (cur as any)?.route ?? '/';
 
   return (
     <div className="lv">
-      <BrowserFrame url={`acmedesk.demo${route}`} badge={<span className="rec">RECORDED</span>}>
+      <BrowserFrame url={`${DEMO_HOST}${route}`} badge={<span className="rec">RECORDED</span>}>
         {cur ? <img src={frames.toSrc(cur)} alt="" className={stage === 3 ? 'dim' : ''} /> : <div className="empty">Loading recorded frames…</div>}
         {stage === 3 && <div className="stamp">CLAIM CONTRADICTED</div>}
       </BrowserFrame>
@@ -50,7 +54,7 @@ function LandingVisual() {
           </li>
         ))}
       </ol>
-      <p className="fine left">Frames from a real recorded run against the AcmeDesk demo target.</p>
+      <p className="fine left">Frames from a real recorded run against {DEMO_TARGET.name}, a deliberately vulnerable application published by OWASP.</p>
     </div>
   );
 }
@@ -66,7 +70,7 @@ export default function Landing({ a }: { a: A }) {
           <em>Prove it.</em>
         </h1>
         <p className="lede">
-          ProofLayer is an AI teammate for behavioral software due diligence. It actually uses software to verify vendor claims before you trust them.
+          Argus tests authorized product workflows and records what it observes. It uses the software to check vendor claims against behavior, and reports only what the evidence supports.
         </p>
         <div className="cta-row">
           <button className="primary lg" onClick={() => a.setRoute('new')}>

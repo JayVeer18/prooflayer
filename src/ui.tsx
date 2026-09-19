@@ -3,6 +3,22 @@ import { STATUS } from './model';
 import type { A } from './useAssessment';
 import type { AssessmentStatus, ClaimStatus } from './types';
 
+/**
+ * The Argus mark: a circle (scope of observation) enclosing an eye (what was seen), with a single
+ * point on the rim marking the captured moment. Strokes use currentColor so the mark inherits the
+ * surrounding text colour in both the sidebar and the report header.
+ */
+export function ArgusMark({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true" focusable="false">
+      <circle cx="24" cy="24" r="21" stroke="currentColor" strokeWidth="2.6" />
+      <path d="M3.6 24c7-8.4 13.8-12.6 20.4-12.6S37.4 15.6 44.4 24c-7 8.4-13.8 12.6-20.4 12.6S10.6 32.4 3.6 24Z" stroke="currentColor" strokeWidth="2.6" strokeLinejoin="round" />
+      <circle cx="24" cy="24" r="5.2" fill="currentColor" />
+      <circle cx="24" cy="3" r="3.4" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function Badge({ status }: { status: ClaimStatus }) {
   const s = STATUS[status];
   return <span className={`st st-${s.tone}`}>{s.label}</span>;
@@ -31,8 +47,8 @@ export function PlatformStrip({ a }: { a: A }) {
     ['Agent runtime', a.replay ? 'recorded run' : 'Makers', true],
     ['Sandbox browser', a.live?.mode ?? '…', Boolean(a.live)],
     ['Model gateway', a.planSource?.model ?? 'plan templates', Boolean(a.planSource?.model)],
-    ['Session state', a.plan.length ? 'checkpointed' : '…', a.plan.length > 0],
-    ['Tracing', a.runId ? a.runId.slice(-10) : '…', Boolean(a.runId)],
+    ['Session state', a.plan.length ? 'saved' : '…', a.plan.length > 0],
+    ['Run reference', a.runId ? a.runId.slice(-10) : '…', Boolean(a.runId)],
   ];
   return (
     <div className="strip" title="Live values from this assessment">

@@ -6,7 +6,7 @@ export type Tone = 'ok' | 'bad' | 'warn' | 'gray' | 'info';
 export const STATUS: Record<ClaimStatus, { label: string; tone: Tone; headline: string; blurb: string }> = {
   UNTESTED: { label: 'Untested', tone: 'gray', headline: 'NOT YET TESTED', blurb: 'No test has been planned for this claim.' },
   PLANNED: { label: 'Planned', tone: 'gray', headline: 'PLANNED', blurb: 'A test is planned and waiting for approval.' },
-  EXECUTING: { label: 'Testing', tone: 'info', headline: 'TESTING', blurb: 'ProofLayer is using the product right now.' },
+  EXECUTING: { label: 'Testing', tone: 'info', headline: 'TESTING', blurb: 'Argus is using the product right now.' },
   SUPPORTED: { label: 'Supported', tone: 'ok', headline: 'CLAIM SUPPORTED', blurb: 'The observed behavior matched the claim in this test.' },
   CONTRADICTED: { label: 'Contradicted', tone: 'bad', headline: 'CLAIM CONTRADICTED', blurb: 'The observed behavior contradicted the claim.' },
   PARTIALLY_VERIFIED: { label: 'Partially verified', tone: 'warn', headline: 'PARTIALLY VERIFIED', blurb: 'Part of the claim held; part did not.' },
@@ -30,6 +30,19 @@ export function groupByClaim(findings: Finding[]): ClaimRow[] {
   for (const f of findings) map.set(f.claimId, [...(map.get(f.claimId) ?? []), f]);
   return [...map.entries()].map(([claimId, tests]) => ({ claimId, claim: tests[0].claim, tests, status: claimStatus(tests) }));
 }
+
+/**
+ * The demo target: our own deployed instance of OWASP Juice Shop, a widely-known, deliberately
+ * vulnerable application maintained by OWASP for exactly this kind of known-answer testing. The
+ * account below is a standard "customer" registration with no administrative rights — it is not a
+ * privileged account, and it is not a real person's credentials.
+ */
+export const DEMO_TARGET = {
+  url: 'https://juice-shop-production-4c88.up.railway.app/',
+  username: 'argus.test@example.com',
+  password: 'ArgusTest1!',
+  name: 'OWASP Juice Shop',
+};
 
 export const DEFAULT_CLAIMS = [
   'Enterprise-grade role-based access control',
@@ -63,6 +76,31 @@ export function saveHistory(entry: StoredAssessment): StoredAssessment[] {
     /* storage unavailable — history is a convenience only */
   }
   return all;
+}
+
+/**
+ * Plain-language vocabulary. The reader is a functional buyer — procurement, risk, GRC — not an
+ * engineer, so the interface never shows raw protocol vocabulary where a plain phrase is just as
+ * exact. The underlying values are unchanged and still visible in the exported report.
+ */
+export const STEP_KIND: Record<string, string> = {
+  claim: 'Claim',
+  hypothesis: 'Check',
+  action: 'Did',
+  observation: 'Saw',
+  evidence: 'Captured',
+  finding: 'Concluded',
+};
+
+/** Turns an HTTP status into what it means for the person reading the finding. */
+export function describeStatus(status: number | null): string {
+  if (status === null) return 'no response';
+  if (status === 401 || status === 403) return `access denied (${status})`;
+  if (status === 404) return `page not found (${status})`;
+  if (status >= 500) return `product error (${status})`;
+  if (status >= 300 && status < 400) return `sent elsewhere (${status})`;
+  if (status >= 200 && status < 300) return `page loaded (${status})`;
+  return String(status);
 }
 
 export const hhmmss = (ts: string) => (ts ? ts.slice(11, 19) : '');

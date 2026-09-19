@@ -7,7 +7,7 @@ export default function NewAssessment({ a }: { a: A }) {
   const { form, setForm } = a;
   const [tpl, setTpl] = useState<string>('Security & Access');
   // A username and password are only needed if the product actually gates access behind
-  // one — ProofLayer detects that during discovery. Both fields must be given together or
+  // one — Argus detects that during discovery. Both fields must be given together or
   // both left empty; the URL is the only hard requirement.
   const credsPaired = Boolean(form.username) === Boolean(form.password);
   const ok = Boolean(form.targetUrl) && credsPaired;
@@ -16,12 +16,12 @@ export default function NewAssessment({ a }: { a: A }) {
     <div className="page-body narrow">
       <div className="eyebrow">New assessment</div>
       <h2>Start a New Assessment</h2>
-      <p className="muted">Tell ProofLayer what to look at and what the vendor claims. Everything is prefilled for the demo target.</p>
+      <p className="muted">Tell Argus what to look at and what the vendor claims. Everything is prefilled for the demo target.</p>
 
       <div className="form">
         <label>
           Product URL
-          <input value={form.targetUrl} onChange={(e) => setForm({ ...form, targetUrl: e.target.value })} placeholder="https://demo.acmeapp.com" />
+          <input value={form.targetUrl} onChange={(e) => setForm({ ...form, targetUrl: e.target.value })} placeholder="https://your-product.example.com" />
         </label>
         <div className="row2">
           <label>
@@ -35,12 +35,12 @@ export default function NewAssessment({ a }: { a: A }) {
         </div>
         <p className="hint">
           Use a <b>standard-user</b> account. Credentials stay in memory for this session only — never stored, logged or sent to a model.
-          {' '}Leave both fields empty if the product doesn't require signing in — ProofLayer checks for a sign-in form and adapts the plan accordingly.
+          {' '}Leave both fields empty if the product doesn't require signing in — Argus checks for a sign-in form and adapts the plan accordingly.
         </p>
         {!credsPaired && <p className="hint" style={{ color: 'var(--warn)' }}>Provide both a username and a password, or leave both empty.</p>}
 
         <label>
-          Vendor claims <span className="opt">one per line · leave empty and ProofLayer finds them on the product</span>
+          Vendor claims <span className="opt">one per line · leave empty and Argus finds them on the product</span>
           <textarea rows={5} value={form.claims} onChange={(e) => setForm({ ...form, claims: e.target.value })} />
         </label>
 

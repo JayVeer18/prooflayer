@@ -1,6 +1,6 @@
 /**
  * POST|GET /probe — platform self-test.
- * Verifies every EdgeOne capability ProofLayer depends on and reports which fallback path is active.
+ * Verifies every EdgeOne capability Argus depends on and reports which fallback path is active.
  * Safe to expose: secrets are never returned (only the CDP hostname).
  */
 import { createDriver } from '../_driver';

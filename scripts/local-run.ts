@@ -3,7 +3,7 @@
  * using a local Edge/Chrome (PL_DRIVER=local).
  *
  *   npm run test:local     → run and print results
- *   npm run record         → also write public/replay/acme-run.json (the recorded-replay fallback)
+ *   npm run record         → also write public/replay/demo-run.json (the recorded-replay fallback)
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -61,11 +61,30 @@ async function main() {
     segments.push(seg);
     last = Date.now();
   };
-  const creds = { targetUrl: base, username: 'buyer@acme-demo.test', password: 'Buyer#2026' };
+  // By default this records against the bundled demo app on a local port. Pass --target/--user/--pass
+  // to record against a real external product instead (the demo recording ships from such a run).
+  const arg = (name: string) => {
+    const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+    return hit ? hit.slice(name.length + 3) : undefined;
+  };
+  const external = arg('target');
+  const creds = {
+    targetUrl: external ?? base,
+    username: arg('user') ?? 'buyer@acme-demo.test',
+    password: arg('pass') ?? 'Buyer#2026',
+  };
+  console.log(`Target: ${creds.targetUrl}${external ? ' (external)' : ' (bundled demo)'}`);
 
   console.log('### PLAN segment');
   beginSegment();
-  await runPlan({ context, emit, body: { ...creds, action: 'plan' } });
+  // Record with the same vendor claims the UI prefills, so the recording covers the claims a viewer
+  // sees on screen — including the role-boundary claim, which is the point of the demo.
+  const claims = arg('claims') ?? [
+    'Enterprise-grade role-based access control',
+    'Secure authentication and session management',
+    'No sensitive data is exposed in the browser',
+  ].join('\n');
+  await runPlan({ context, emit, body: { ...creds, action: 'plan', claims } });
   const plan = captured.plan?.[0]?.items;
   const surfaces = captured.surfaces?.[0]?.items;
   if (!plan) throw new Error('no plan produced');
@@ -92,13 +111,16 @@ async function main() {
   console.log(captured.complete?.[0]?.narrative);
 
   if (RECORD) {
-    // The recording came from a local run; present the target neutrally and label the mode at play time.
-    const raw = JSON.stringify({ version: 1, recordedAt: new Date().toISOString(), segments })
-      .replace(/localhost:\d+/g, 'acmedesk.demo')
-      .replace(/http:\/\/acmedesk\.demo/g, 'https://acmedesk.demo');
+    // A recording of the bundled demo is rewritten to a neutral hostname, since "localhost:54321"
+    // would be meaningless at play time. A recording of a real external product keeps its own URL —
+    // the whole point is that the evidence names the product that was actually tested.
+    let raw = JSON.stringify({ version: 1, recordedAt: new Date().toISOString(), segments });
+    if (!external) {
+      raw = raw.replace(/localhost:\d+/g, 'acmedesk.demo').replace(/http:\/\/acmedesk\.demo/g, 'https://acmedesk.demo');
+    }
     fs.mkdirSync(path.resolve('public/replay'), { recursive: true });
-    fs.writeFileSync(path.resolve('public/replay/acme-run.json'), raw);
-    console.log(`\nRecorded ${segments.map((s) => s.length).join(' + ')} events → public/replay/acme-run.json (${Math.round(raw.length / 1024)} KB)`);
+    fs.writeFileSync(path.resolve('public/replay/demo-run.json'), raw);
+    console.log(`\nRecorded ${segments.map((s) => s.length).join(' + ')} events → public/replay/demo-run.json (${Math.round(raw.length / 1024)} KB)`);
   }
   server.close();
   process.exit(0);
