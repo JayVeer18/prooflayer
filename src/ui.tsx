@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { STATUS } from './model';
 import type { A } from './useAssessment';
 import type { AssessmentStatus, ClaimStatus } from './types';
@@ -16,6 +16,53 @@ export function ArgusMark({ size = 20 }: { size?: number }) {
       <circle cx="24" cy="24" r="5.2" fill="currentColor" />
       <circle cx="24" cy="3" r="3.4" fill="currentColor" />
     </svg>
+  );
+}
+
+type Theme = 'light' | 'dark';
+const THEME_KEY = 'argus.theme';
+
+/** Applies the theme to <html>, which is what the CSS variable blocks key off. */
+function applyTheme(t: Theme) {
+  document.documentElement.setAttribute('data-theme', t);
+}
+
+/**
+ * Light/dark switch. Defaults to the operating system preference so the first view matches the rest
+ * of the person's environment; an explicit choice is remembered. Storage is a convenience only — if
+ * it is unavailable the toggle still works for the session.
+ */
+export function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {
+      /* private mode or blocked storage — fall through to the system preference */
+    }
+    return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  });
+
+  useEffect(() => {
+    applyTheme(theme);
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* the choice still applies for this session */
+    }
+  }, [theme]);
+
+  const next = theme === 'dark' ? 'light' : 'dark';
+  return (
+    <button
+      className="themetoggle"
+      onClick={() => setTheme(next)}
+      aria-label={`Switch to ${next} theme`}
+      title={`Switch to ${next} theme`}
+    >
+      <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+      <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+    </button>
   );
 }
 

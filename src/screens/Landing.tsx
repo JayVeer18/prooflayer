@@ -77,7 +77,7 @@ export default function Landing({ a }: { a: A }) {
             Start an Assessment
           </button>
           <button className="ghost lg" onClick={() => a.generatePlan(true)}>
-            Watch 3-Minute Demo
+            Try Interactive Demo
           </button>
         </div>
         <ul className="pillars">

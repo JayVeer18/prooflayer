@@ -7,7 +7,7 @@ import { Assessments, Library, Settings } from './screens/Others';
 import Plan from './screens/Plan';
 import Report from './screens/Report';
 import Results from './screens/Results';
-import { ArgusMark } from './ui';
+import { ArgusMark, ThemeToggle } from './ui';
 import { useAssessment, type A } from './useAssessment';
 import type { Route } from './types';
 
@@ -46,7 +46,8 @@ function Sidebar({ a }: { a: A }) {
         </>
       )}
       <div className="side-foot">
-        {a.replay && a.hasSession ? <span className="rec">RECORDED RUN</span> : <span className="muted">Powered by Tencent EdgeOne Makers</span>}
+        <ThemeToggle />
+        <span className="muted">Powered by Tencent EdgeOne Makers</span>
       </div>
     </aside>
   );
