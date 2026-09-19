@@ -65,12 +65,12 @@ export default function Landing({ a }: { a: A }) {
       <section className="hero-l">
         <div className="eyebrow">AI software due diligence</div>
         <h1>
-          Don’t ask if it’s enterprise-ready.
+          Accelerate software decisions
           <br />
-          <em>Prove it.</em>
+          <em>with trusted evidence.</em>
         </h1>
         <p className="lede">
-          Argus tests authorized product workflows and records what it observes. It uses the software to check vendor claims against behavior, and reports only what the evidence supports.
+          Argus helps teams across procurement, security, IT, and the business validate what matters, reduce evaluation time, and move forward with confidence.
         </p>
         <div className="cta-row">
           <button className="primary lg" onClick={() => a.setRoute('new')}>
