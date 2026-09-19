@@ -22,11 +22,20 @@ class FakeDriver implements Driver {
   private pending: NetEvt[] = [];
   private cur = { url: '', status: 200, title: '', text: '', loginForm: false, rows: 0 };
 
-  constructor(private cfg: { adminAccessible: boolean; goodPass: string; loginWorks?: boolean }) {}
+  constructor(private cfg: { adminAccessible: boolean; goodPass: string; loginWorks?: boolean; noAuth?: boolean }) {}
 
   private pageFor(u: URL) {
     const login = { url: '/demo/login/', status: 200, title: 'Sign in', text: 'Sign in', loginForm: true, rows: 0 };
     const p = u.pathname;
+    // A product with no authentication at all: every page renders directly, there is never a login form.
+    if (this.cfg.noAuth) {
+      if (/admin\/users/.test(p)) {
+        if (!this.cfg.adminAccessible) return { url: p, status: 404, title: 'Not found', text: 'Page not found', loginForm: false, rows: 0 };
+        return { url: p, status: 200, title: 'User Management', text: 'User Management — administrators only', loginForm: false, rows: 4 };
+      }
+      if (p === '/demo/' || p === '/demo/login/') return { url: '/demo/dashboard/', status: 200, title: 'Dashboard', text: 'Dashboard', loginForm: false, rows: 0 };
+      return { url: p, status: 200, title: 'Page', text: 'Page', loginForm: false, rows: 0 };
+    }
     if (p === '/demo/' || p === '/demo/login/') return this.loggedIn ? { ...login, url: '/demo/dashboard/', title: 'Dashboard', text: 'Dashboard', loginForm: false } : login;
     if (!this.loggedIn) return login;
     if (/admin\/users/.test(p)) {
@@ -88,15 +97,15 @@ class FakeDriver implements Driver {
   async close() {}
 }
 
-function mkCtx(d: FakeDriver): Ctx {
+function mkCtx(d: FakeDriver, creds: { user: string; pass: string } = { user: 'buyer@x.test', pass: d['cfg'].goodPass }): Ctx {
   const traceLog: Ctx['traceLog'] = [];
   let n = 0;
   return {
     d,
     traceLog,
     target: new URL('https://x.test/demo/'),
-    user: 'buyer@x.test',
-    pass: d['cfg'].goodPass,
+    user: creds.user,
+    pass: creds.pass,
     emit: () => {},
     runId: 'run-1',
     surfaces: [{ name: 'Admin', path: '/demo/admin/users/', hidden: true }],
@@ -231,4 +240,32 @@ test('state: DISCOVERY → PLAN → APPROVAL → EXECUTION → FINDINGS, with pa
 
 test('state: execution cannot start before the plan is approved', () => {
   assert.throws(() => transition('PLAN', 'EXECUTION'), /Illegal assessment transition/);
+});
+
+/* ───────────────────────────── 6. optional authentication ───────────────────────────── */
+
+test('optional auth: a product with no login form is NOT_VERIFIED/SKIPPED for session claims, not INCONCLUSIVE', async () => {
+  const d = new FakeDriver({ adminAccessible: false, goodPass: 'good', noAuth: true });
+  const item = { ...rbacItem(), id: 't2', template: 'auth_session' as const };
+  const f = await authSession(mkCtx(d, { user: '', pass: '' }), item);
+  assert.equal(f.status, 'NOT_VERIFIED');
+  assert.equal(f.testStatus, 'SKIPPED');
+  assert.doesNotMatch(f.observed, /AUTHENTICATION FAILED/);
+  assert.match(f.observed, /does not appear to require authentication|no sign-in form/i);
+});
+
+test('optional auth: an RBAC claim on a no-auth product is skipped as not applicable, never reported as a failed login', async () => {
+  const d = new FakeDriver({ adminAccessible: true, goodPass: 'good', noAuth: true });
+  const f = await rbacDirectNav(mkCtx(d, { user: '', pass: '' }), rbacItem());
+  assert.equal(f.status, 'NOT_VERIFIED');
+  assert.equal(f.testStatus, 'SKIPPED');
+  assert.doesNotMatch(f.observed, /AUTHENTICATION FAILED/);
+});
+
+test('optional auth: wrong credentials on a product that DOES have a login form still fail honestly', async () => {
+  const d = new FakeDriver({ adminAccessible: false, goodPass: 'good', loginWorks: false });
+  const item = { ...rbacItem(), id: 't2', template: 'auth_session' as const };
+  const f = await authSession(mkCtx(d, { user: 'buyer@x.test', pass: 'wrong' }), item);
+  assert.equal(f.status, 'INCONCLUSIVE');
+  assert.match(f.observed, /AUTHENTICATION FAILED/);
 });

@@ -7,6 +7,7 @@
  *   3. PlaywrightDriver over a local Edge/Chrome (PL_DRIVER=local) → local development & tests
  */
 import { now, sleep, withTimeout } from './_util';
+import { ENSURE_CURSOR_SCRIPT, moveCursorToSelectorScript, typingBadgeScript } from './_cursor';
 import type { ConEvt, NetEvt } from './_types';
 
 export interface Shot {
@@ -35,13 +36,19 @@ export interface Driver {
   close(): Promise<void>;
 }
 
-const CLICK_TEXT_SCRIPT = (texts: string[]) => `(function(){
+const CLICK_TEXT_SCRIPT = (texts: string[]) => `${ENSURE_CURSOR_SCRIPT};(function(){
   var want=${JSON.stringify(texts.map((t) => t.toLowerCase()))};
   var els=Array.prototype.slice.call(document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]'));
   for (var i=0;i<els.length;i++){
     var t=((els[i].innerText||els[i].value||els[i].textContent||'')+'').trim().toLowerCase();
     if(!t) continue;
-    for (var j=0;j<want.length;j++){ if(t===want[j]||t.indexOf(want[j])===0){ els[i].click(); return true; } }
+    for (var j=0;j<want.length;j++){ if(t===want[j]||t.indexOf(want[j])===0){
+      var el=els[i]; el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+      var r=el.getBoundingClientRect(); var cx=r.left+r.width/2, cy=r.top+r.height/2;
+      var cur=document.getElementById('__pl_cursor');
+      if(cur){ cur.style.left=(cx-2)+'px'; cur.style.top=(cy-2)+'px'; cur.classList.remove('click'); void cur.offsetWidth; cur.classList.add('click'); }
+      el.click(); return true;
+    } }
   }
   return false; })()`;
 
@@ -114,10 +121,38 @@ export class PlaywrightDriver implements Driver {
     return { url: this.page.url(), status: resp ? resp.status() : null, title: await this.title() };
   }
   async fill(selector: string, text: string) {
-    await this.safe(() => this.page.locator(selector).first().fill(text, { timeout: 8000 }));
+    // Real keystrokes at a human pace, with a visible synthetic cursor and a typing badge,
+    // so the live view shows a field being typed into rather than a value appearing instantly.
+    // (Local test runs stay instant — no audience is watching those.)
+    if (this.mode === 'local') {
+      await this.safe(() => this.page.locator(selector).first().fill(text, { timeout: 8000 }));
+      return;
+    }
+    await this.safe(async () => {
+      await this.page.evaluate(moveCursorToSelectorScript(selector, true));
+      const loc = this.page.locator(selector).first();
+      await loc.click({ timeout: 8000 });
+      await loc.fill('', { timeout: 8000 });
+      // The badge reads the field's live value and masks it in-page based on the element's own
+      // type="password" attribute — the real value never passes through this Node process as text.
+      // pressSequentially has no per-keystroke hook, so refresh the badge at intervals instead of
+      // only at the end — this keeps it honestly tied to what's actually in the field as it fills.
+      const refresh = setInterval(() => {
+        this.page.evaluate(typingBadgeScript(selector, true)).catch(() => undefined);
+      }, 90);
+      try {
+        await loc.pressSequentially(text, { delay: 45 });
+      } finally {
+        clearInterval(refresh);
+      }
+      await this.page.evaluate(typingBadgeScript(selector, false));
+    });
   }
   async click(selector: string) {
-    await this.safe(() => this.page.locator(selector).first().click({ timeout: 8000 }));
+    await this.safe(async () => {
+      if (this.mode !== 'local') await this.page.evaluate(moveCursorToSelectorScript(selector, true));
+      await this.page.locator(selector).first().click({ timeout: 8000 });
+    });
   }
   async clickText(texts: string[]) {
     return this.safe(() => this.page.evaluate(CLICK_TEXT_SCRIPT(texts))) as Promise<boolean>;
@@ -229,15 +264,28 @@ export class SandboxApiDriver implements Driver {
   }
   async fill(selector: string, text: string) {
     await this.hooks();
-    const script = `(function(){var el=document.querySelector(${JSON.stringify(selector)});if(!el)return false;
-      var proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
-      var set=Object.getOwnPropertyDescriptor(proto,'value').set;set.call(el,${JSON.stringify(text)});
-      el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`;
-    const ok = await this.sb.evaluate(script);
-    if (ok === false) throw new Error(`fill: no element for ${selector}`);
+    await this.sb.evaluate(moveCursorToSelectorScript(selector, true));
+    // The badge reads the field's live value and masks it in-page based on the element's own
+    // type="password" attribute — the real value never passes through this Node process as text.
+    // Type character by character so the live view shows the entry (short strings only).
+    const steps = text.length <= 32 ? text.length : 1;
+    for (let i = 1; i <= steps; i++) {
+      const part = steps === 1 ? text : text.slice(0, i);
+      const script = `(function(){var el=document.querySelector(${JSON.stringify(selector)});if(!el)return false;
+        if(${i === 1}){el.focus();}
+        var proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
+        var set=Object.getOwnPropertyDescriptor(proto,'value').set;set.call(el,${JSON.stringify(part)});
+        el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`;
+      const ok = await this.sb.evaluate(script);
+      if (ok === false) throw new Error(`fill: no element for ${selector}`);
+      await this.sb.evaluate(typingBadgeScript(selector, true));
+      if (steps > 1) await sleep(35);
+    }
+    await this.sb.evaluate(typingBadgeScript(selector, false));
   }
   async click(selector: string) {
     await this.hooks();
+    await this.sb.evaluate(moveCursorToSelectorScript(selector, true));
     const ok = await this.sb.evaluate(
       `(function(){var el=document.querySelector(${JSON.stringify(selector)});if(!el)return false;el.click();return true;})()`,
     );

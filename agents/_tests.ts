@@ -93,9 +93,11 @@ async function openLogin(ctx: Ctx): Promise<boolean> {
   return waitFor(() => hasLoginForm(ctx.d), 1800);
 }
 
-async function submitLogin(ctx: Ctx, user: string, pass: string) {
+async function submitLogin(ctx: Ctx, user: string, pass: string, label?: string) {
   await ctx.d.fill(USER_SEL, user);
   await ctx.d.fill(PASS_SEL, pass);
+  // Password fields render as dots, so this frame shows the entry without exposing the secret.
+  if (label) await ctx.shot(label);
   try {
     await ctx.d.click(SUBMIT_SEL);
   } catch {
@@ -104,13 +106,21 @@ async function submitLogin(ctx: Ctx, user: string, pass: string) {
   await ctx.d.settle();
 }
 
-/** Signs in with the provided credentials if the browser isn't already signed in. */
-export async function ensureLoggedIn(ctx: Ctx): Promise<boolean> {
+export type AuthOutcome = 'signed-in' | 'no-auth-needed' | 'failed';
+
+/**
+ * Signs in with the provided credentials if the target has a login form.
+ * Distinguishes "there is nothing to sign into" (a public/no-auth product) from
+ * "credentials were wrong" — the two must never be reported the same way.
+ */
+export async function ensureLoggedIn(ctx: Ctx): Promise<AuthOutcome> {
   if (await openLogin(ctx)) {
-    await submitLogin(ctx, ctx.user, ctx.pass);
-    return waitFor(async () => !(await hasLoginForm(ctx.d)), 4000);
+    ctx.log('act', 'Entering the test credentials');
+    await submitLogin(ctx, ctx.user, ctx.pass, 'Entering credentials');
+    const ok = await waitFor(async () => !(await hasLoginForm(ctx.d)), 4000);
+    return ok ? 'signed-in' : 'failed';
   }
-  return true;
+  return 'no-auth-needed';
 }
 
 function evidence(ctx: Ctx, item: PlanItem, route: string, shots: string[], net: NetEvt[], con: ConEvt[]): Evidence {
@@ -177,18 +187,18 @@ export async function authSession(ctx: Ctx, item: PlanItem): Promise<Finding> {
   ctx.log('act', 'Opening the sign-in page');
   if (!(await openLogin(ctx))) {
     return finding(item, {
-      status: 'INCONCLUSIVE',
-      testStatus: 'BLOCKED',
+      status: 'NOT_VERIFIED',
+      testStatus: 'SKIPPED',
       severity: 'INFO',
       test: 'Locate sign-in form',
-      observed: 'The validation could not be completed: no sign-in form was found at the provided URL. No conclusion was made about the vendor claim.',
+      observed: 'No sign-in form was found — this product (or this page) does not appear to require authentication, so session behavior does not apply.',
       evidence: evidence(ctx, item, pathOf(ctx.target.href), shots, net, con),
     });
   }
 
   ctx.log('act', 'Submitting an invalid password');
   ctx.trace('action', 'Submit invalid credentials', item.id);
-  await submitLogin(ctx, ctx.user, `wrong-${Math.random().toString(36).slice(2, 8)}`);
+  await submitLogin(ctx, ctx.user, `wrong-${Math.random().toString(36).slice(2, 8)}`, 'Invalid password entered');
   const stillOnLogin = await hasLoginForm(d);
   const errText = await d.evaluate<string>(
     `(function(){var t=(document.body?document.body.innerText:'');var m=t.match(/[^\\n]*(invalid|incorrect|wrong|failed|denied|not recogni)[^\\n]*/i);return m?m[0].trim():''})()`,
@@ -200,6 +210,7 @@ export async function authSession(ctx: Ctx, item: PlanItem): Promise<Finding> {
   ctx.log('act', 'Signing in with the provided credentials');
   await d.fill(PASS_SEL, ctx.pass);
   await d.fill(USER_SEL, ctx.user);
+  await ctx.shot('Entering credentials');
   try {
     await d.click(SUBMIT_SEL);
   } catch {
@@ -260,7 +271,18 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
   const shots: string[] = [];
   ctx.trace('hypothesis', item.hypothesis, item.id);
 
-  if (!(await ensureLoggedIn(ctx))) {
+  const authResult = await ensureLoggedIn(ctx);
+  if (authResult === 'no-auth-needed') {
+    return finding(item, {
+      status: 'NOT_VERIFIED',
+      testStatus: 'SKIPPED',
+      severity: 'INFO',
+      test: 'Sign in as the provided standard user',
+      observed: 'No sign-in form was found — this product does not appear to gate access behind authentication, so a role-boundary claim does not apply here.',
+      evidence: evidence(ctx, item, pathOf(ctx.target.href), shots, [], []),
+    });
+  }
+  if (authResult === 'failed') {
     return finding(item, {
       status: 'INCONCLUSIVE',
       testStatus: 'BLOCKED',
@@ -367,9 +389,10 @@ export async function runtimeSignals(ctx: Ctx, item: PlanItem): Promise<Finding>
   await d.resetSession();
   await d.drain();
 
-  ctx.log('act', 'Fresh sign-in with browser console and network capture on');
-  ctx.trace('action', 'Sign in while capturing console + network', item.id);
-  await ensureLoggedIn(ctx);
+  ctx.log('act', 'Fresh visit with browser console and network capture on');
+  ctx.trace('action', 'Load the product while capturing console + network', item.id);
+  const authOutcome = await ensureLoggedIn(ctx);
+  if (authOutcome === 'signed-in') ctx.log('info', 'Signed in for this check');
   await d.settle();
   const f = await ctx.flush();
   const shotId = await ctx.shot('Runtime capture after sign-in');
@@ -445,13 +468,16 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
   }
 
   const ai = ctx.surfaces.find((s) => !s.hidden && /\bai\b|assistant|copilot|govern/i.test(`${s.name} ${s.path}`));
-  if (!ai || !(await ensureLoggedIn(ctx))) {
+  const aiAuth = ai ? await ensureLoggedIn(ctx) : 'failed';
+  if (!ai || aiAuth === 'failed') {
     return finding(item, {
       status: 'INCONCLUSIVE',
       testStatus: 'BLOCKED',
       severity: 'INFO',
       test,
-      observed: 'The validation could not be completed: no AI assistant surface was reachable. No conclusion was made about the vendor claim.',
+      observed: !ai
+        ? 'The validation could not be completed: no AI assistant surface was reachable. No conclusion was made about the vendor claim.'
+        : 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.',
       evidence: evidence(ctx, item, '', shots, [], []),
     });
   }

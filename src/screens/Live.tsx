@@ -73,10 +73,15 @@ function ResultCard({ a }: { a: A }) {
 
 export default function Live({ a }: { a: A }) {
   const [tab, setTab] = useState<Tab>('activity');
+  const [view, setView] = useState<'live' | 'shots' | null>(null);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [a.logs, tab]);
 
   const cur = a.shots[a.latest];
+  // The sandbox's real-time browser view (noVNC) shows typing and clicks as they happen.
+  // Default to it when available; snapshots are the fallback and stay one click away.
+  const liveUrl = a.live?.url ?? null;
+  const showLive = liveUrl !== null && (view ?? 'live') === 'live';
   const running = a.plan.find((p) => a.tests[p.id] === 'running');
   const finished = a.plan.filter((p) => a.tests[p.id] && a.tests[p.id] !== 'running').length;
   const enabled = a.plan.filter((p) => p.enabled).length;
@@ -102,9 +107,26 @@ export default function Live({ a }: { a: A }) {
         <section className="browser-col" aria-label="Live target">
           <BrowserFrame
             url={cur ? `${a.replay ? 'acmedesk.demo' : new URL(a.form.targetUrl || location.href, location.href).host}${cur.route}` : ''}
-            badge={running ? <span className="nowtest">Testing: {running.title}</span> : undefined}
+            badge={
+              <>
+                {running && <span className="nowtest">Testing: {running.title}</span>}
+                {liveUrl && (
+                  <span className="viewtoggle" role="group" aria-label="Browser view">
+                    <button className={showLive ? 'on' : ''} onClick={() => setView('live')}>Live view</button>
+                    <button className={!showLive ? 'on' : ''} onClick={() => setView('shots')}>Snapshots</button>
+                    <a href={liveUrl} target="_blank" rel="noreferrer" title="Open the live view in its own tab">↗</a>
+                  </span>
+                )}
+              </>
+            }
           >
-            {cur ? <img src={cur.src} alt={cur.label} /> : <div className="empty">Launching isolated browser…</div>}
+            {showLive ? (
+              <iframe className="livefr" src={liveUrl!} title="Live browser" allow="clipboard-read; clipboard-write" />
+            ) : cur ? (
+              <img src={cur.src} alt={cur.label} />
+            ) : (
+              <div className="empty">Launching isolated browser…</div>
+            )}
             {a.lastEvidence && <div className="evpill">● Evidence captured · {a.lastEvidence}</div>}
             {a.resultCard && <ResultCard a={a} />}
           </BrowserFrame>

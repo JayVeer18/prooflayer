@@ -108,7 +108,9 @@ function parseTarget(body: Record<string, any>): { target: URL; user: string; pa
   if (!/^https?:$/.test(target.protocol)) throw new Error('Only http(s) product URLs are supported.');
   const user = String(body.username ?? '');
   const pass = String(body.password ?? '');
-  if (!user || !pass) throw new Error('Test credentials are required.');
+  // Credentials are optional: not every product requires authentication. If only one of the two
+  // is given, that is a mistake worth surfacing rather than silently treating as "no auth".
+  if ((user && !pass) || (pass && !user)) throw new Error('Provide both a username and a password, or leave both empty for a product that needs no sign-in.');
   return { target, user, pass };
 }
 
@@ -235,14 +237,19 @@ export async function runPlan(io: Io): Promise<void> {
     texts.push(await d.text());
     await ctx.shot('Target loaded');
 
-    log('act', 'Signing in with the provided test credentials');
-    const ok = await ensureLoggedIn(ctx);
-    if (!ok) {
+    log('act', user ? 'Signing in with the provided test credentials' : 'Checking whether the product requires authentication');
+    const authOutcome = await ensureLoggedIn(ctx);
+    let requiresAuth = true;
+    if (authOutcome === 'no-auth-needed') {
+      requiresAuth = false;
+      log('ok', 'No sign-in form was found — this product does not appear to require authentication');
+    } else if (authOutcome === 'failed') {
       emit('error', { kind: 'auth', message: 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.' });
       return;
+    } else {
+      await ctx.shot('Signed in');
+      log('ok', 'Signed in — credentials are held in memory for this run only');
     }
-    await ctx.shot('Signed in');
-    log('ok', 'Signed in — credentials are held in memory for this run only');
     await ctx.flush();
 
     /* ── discover ── */
@@ -287,15 +294,22 @@ export async function runPlan(io: Io): Promise<void> {
     emit('claims', { items: claims });
 
     /* ── plan ── */
-    let items: PlanItem[] = claims.map((c, i) => ({
-      id: `t${i + 1}`,
-      claimId: c.id,
-      claim: c.text,
-      claimKey: c.key,
-      template: templateFor(c.key),
-      enabled: true,
-      ...defaults(c),
-    }));
+    const AUTH_DEPENDENT: TemplateId[] = ['auth_session', 'rbac_direct_nav'];
+    let items: PlanItem[] = claims
+      .map((c, i) => ({
+        id: `t${i + 1}`,
+        claimId: c.id,
+        claim: c.text,
+        claimKey: c.key,
+        template: templateFor(c.key),
+        enabled: true,
+        ...defaults(c),
+      }))
+      .filter((it) => requiresAuth || !AUTH_DEPENDENT.includes(it.template));
+    if (!requiresAuth) {
+      const dropped = claims.length - items.length;
+      if (dropped > 0) log('info', `${dropped} claim(s) about login/role boundaries were left out of the plan — this product does not require authentication`);
+    }
     items.sort((a, b) => ORDER[a.template] - ORDER[b.template]);
 
     const llm = await llmJSON<{ items: Array<Partial<PlanItem> & { claimId: string }> }>(

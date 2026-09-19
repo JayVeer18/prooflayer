@@ -6,7 +6,11 @@ import type { A } from '../useAssessment';
 export default function NewAssessment({ a }: { a: A }) {
   const { form, setForm } = a;
   const [tpl, setTpl] = useState<string>('Security & Access');
-  const ok = form.targetUrl && form.username && form.password;
+  // A username and password are only needed if the product actually gates access behind
+  // one — ProofLayer detects that during discovery. Both fields must be given together or
+  // both left empty; the URL is the only hard requirement.
+  const credsPaired = Boolean(form.username) === Boolean(form.password);
+  const ok = Boolean(form.targetUrl) && credsPaired;
 
   return (
     <div className="page-body narrow">
@@ -21,7 +25,7 @@ export default function NewAssessment({ a }: { a: A }) {
         </label>
         <div className="row2">
           <label>
-            Authorized test credentials — username
+            Authorized test credentials — username <span className="opt">optional, if the product needs sign-in</span>
             <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} autoComplete="off" placeholder="test.user@example.com" />
           </label>
           <label>
@@ -29,7 +33,11 @@ export default function NewAssessment({ a }: { a: A }) {
             <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" />
           </label>
         </div>
-        <p className="hint">Use a <b>standard-user</b> account. Credentials stay in memory for this session only — never stored, logged or sent to a model.</p>
+        <p className="hint">
+          Use a <b>standard-user</b> account. Credentials stay in memory for this session only — never stored, logged or sent to a model.
+          {' '}Leave both fields empty if the product doesn't require signing in — ProofLayer checks for a sign-in form and adapts the plan accordingly.
+        </p>
+        {!credsPaired && <p className="hint" style={{ color: 'var(--warn)' }}>Provide both a username and a password, or leave both empty.</p>}
 
         <label>
           Vendor claims <span className="opt">one per line · leave empty and ProofLayer finds them on the product</span>
