@@ -15,7 +15,7 @@ interface Rec {
 
 let cache: { segments: Rec[][] } | null = null;
 
-async function load() {
+export async function load() {
   if (!cache) {
     const res = await fetch('/replay/acme-run.json');
     if (!res.ok) throw new Error('Recorded run is not available');

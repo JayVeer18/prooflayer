@@ -134,7 +134,7 @@ export class PlaywrightDriver implements Driver {
   }
   async title() {
     try {
-      return await this.safe(() => this.page.title());
+      return String(await this.safe(() => this.page.title()));
     } catch {
       return '';
     }
@@ -351,7 +351,7 @@ export async function createDriver(
     const cdpUrl = await read(sb, 'cdpUrl');
     if (!cdpUrl) throw new Error('no cdpUrl');
     const pw = await loadPlaywright();
-    const browser = await withTimeout(pw.chromium.connectOverCDP(String(cdpUrl)), 20000, 'CDP connect');
+    const browser: any = await withTimeout<any>(pw.chromium.connectOverCDP(String(cdpUrl)), 20000, 'CDP connect');
     const ctx = browser.contexts()[0] ?? (await browser.newContext());
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     try {

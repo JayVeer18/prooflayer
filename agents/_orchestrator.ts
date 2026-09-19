@@ -10,7 +10,9 @@ import { buildClaims, extractClaims, templateFor } from './_claims';
 import { llmJSON, modelName } from './_llm';
 import { DEFAULT_AI_PAYLOAD, ensureLoggedIn, flagCon, flagNet, runTemplate, type Ctx } from './_tests';
 import { now, pathOf, redact, withTimeout } from './_util';
-import type { Approval, Claim, ConEvt, Emit, Finding, NetEvt, PlanItem, Surface, TemplateId } from './_types';
+import { effectiveRisk, gate } from './_policy';
+import { transition, type AssessmentStatus } from './_state';
+import type { Approval, Claim, ClaimStatus, ConEvt, Emit, Finding, NetEvt, PlanItem, Surface, TemplateId, TestStatus } from './_types';
 
 export interface Io {
   context: any;
@@ -28,15 +30,23 @@ const ORDER: Record<TemplateId, number> = {
 
 /* ─────────────────────────────── plan defaults ─────────────────────────────── */
 
-function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim' | 'claimKey' | 'template' | 'enabled'> {
+export function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim' | 'claimKey' | 'template' | 'enabled'> {
   switch (templateFor(claim.key)) {
     case 'rbac_direct_nav':
       return {
         title: 'Role boundary enforcement',
-        hypothesis: 'A standard user cannot open administrative pages by navigating to them directly.',
+        hypothesis: 'A standard user cannot access administrative functionality.',
         expected: 'Standard user is denied (redirect, 401 or 403) on every privileged route.',
         rationale: 'Role-based access claims are testable by direct navigation and hidden-control discovery.',
         priority: 'high',
+        procedure: [
+          'Authenticate as a standard user',
+          'Discover administrative routes (visible and hidden controls)',
+          'Navigate directly to each privileged surface',
+          'Observe the authorization response (redirect, 401/403, or rendered page)',
+          'Capture evidence',
+        ],
+        risk: 'SAFE',
         requiresApproval: false,
       };
     case 'auth_session':
@@ -46,6 +56,8 @@ function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim' | 'cl
         expected: 'Invalid login is rejected; a protected page redirects to sign-in after logout.',
         rationale: 'Session claims are testable through login, logout and protected-route requests.',
         priority: 'high',
+        procedure: ['Submit an invalid password', 'Sign in with the provided credentials', 'Sign out', 'Request a protected page directly', 'Observe whether re-authentication is required'],
+        risk: 'SAFE',
         requiresApproval: false,
       };
     case 'runtime_signals':
@@ -55,6 +67,8 @@ function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim' | 'cl
         expected: 'No credentials in console output or URLs; no uncaught errors or unexpected external calls.',
         rationale: 'Browser console and network traffic are directly observable.',
         priority: 'medium',
+        procedure: ['Start from a signed-out browser', 'Sign in while capturing console and network activity', 'Inspect for credentials, errors and unexpected external calls'],
+        risk: 'SAFE',
         requiresApproval: false,
       };
     case 'ai_data_protection':
@@ -62,8 +76,10 @@ function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim' | 'cl
         title: 'AI sensitive-data protection',
         hypothesis: 'Sensitive identifiers submitted to the AI assistant are masked before they are sent to the model.',
         expected: 'SSN, card number and email are masked in the outbound payload.',
-        rationale: 'Submitting synthetic sensitive data is a safe, observable test — it needs your approval first.',
+        rationale: 'Submitting synthetic sensitive data is observable and safe, but it sends data to another system — so it needs your approval first.',
         priority: 'high',
+        procedure: ['Open the AI assistant', 'Submit synthetic sensitive data (fake SSN, card number, email) — needs your approval', 'Inspect what is sent to the model'],
+        risk: 'REVIEW',
         requiresApproval: true,
       };
     default:
@@ -73,6 +89,8 @@ function defaults(claim: Claim): Omit<PlanItem, 'id' | 'claimId' | 'claim' | 'cl
         expected: 'Claim is either verifiable through product behavior or explicitly reported as not verifiable.',
         rationale: 'Some claims cannot be proven from the outside; ProofLayer says so instead of guessing.',
         priority: 'low',
+        procedure: ['Check whether the claim is observable through the product interface', 'If it is not, report NOT VERIFIED and recommend the evidence to request'],
+        risk: 'SAFE',
         requiresApproval: false,
       };
   }
@@ -99,8 +117,10 @@ function buildCtx(io: Io, d: Driver, target: URL, user: string, pass: string, su
   let n = 0;
   let s = 0;
   const runId = String(io.context.runId ?? io.context.conversation_id ?? `run-${Date.now().toString(36)}`);
+  const PREFIX: Record<string, string> = { claim: 'clm', hypothesis: 'hyp', action: 'act', observation: 'obs', evidence: 'evd', finding: 'fnd' };
   const ctx: Ctx = {
     d,
+    traceLog: [],
     target,
     user,
     pass,
@@ -109,7 +129,11 @@ function buildCtx(io: Io, d: Driver, target: URL, user: string, pass: string, su
     surfaces,
     secrets,
     log: (level, text) => io.emit('log', { ts: now(), level, text: redact(text, secrets) }),
-    trace: (kind, text, ref) => io.emit('trace', { id: `t${++n}`, kind, text: redact(text, secrets), ts: now(), ref }),
+    trace: (kind, text, ref) => {
+      const id = `${PREFIX[kind] ?? 'trc'}-${++n}`;
+      ctx.traceLog.push({ id, kind, ref });
+      io.emit('trace', { id, kind, text: redact(text, secrets), ts: now(), ref });
+    },
     shot: async (label) => {
       try {
         const sh = await d.screenshot();
@@ -141,6 +165,53 @@ async function persist(io: Io, snapshot: unknown) {
   }
 }
 
+/** Attach the reasoning chain (claim → hypothesis → actions → observations → evidence) to a finding. */
+export function linkFinding(ctx: Pick<Ctx, 'traceLog'>, item: PlanItem, f: Finding, approval?: Approval): Finding {
+  const ids = (kind: string) => ctx.traceLog.filter((t) => t.ref === item.id && t.kind === kind).map((t) => t.id);
+  const ev = f.evidence;
+  return {
+    ...f,
+    hypothesisId: `h-${item.id}`,
+    actionIds: ids('action'),
+    observationIds: ids('observation'),
+    evidenceIds: [
+      ...ev.screenshotIds,
+      ...(ev.route ? [`${f.id}:url`] : []),
+      ...(ev.network.length ? [`${f.id}:net`] : []),
+      ...(ev.console.length ? [`${f.id}:con`] : []),
+      `${f.id}:trace`,
+    ],
+    approval: approval ? { decision: approval.decision, at: now(), modified: Boolean(approval.payload) } : undefined,
+  };
+}
+
+/** A finding for a test that did not run (skipped, blocked by policy, or could not complete). */
+function withoutRun(ctx: Ctx, item: PlanItem, status: ClaimStatus, testStatus: TestStatus, observed: string, approval?: Approval): Finding {
+  return linkFinding(
+    ctx,
+    item,
+    {
+      id: `f-${item.id}`,
+      testId: item.id,
+      claimId: item.claimId,
+      claim: item.claim,
+      title: item.title,
+      status,
+      testStatus,
+      severity: 'INFO',
+      expected: item.expected,
+      observed,
+      test: item.hypothesis,
+      evidence: { screenshotIds: [], route: '', timestamp: now(), network: [], console: [], traceRef: `${ctx.runId}#${item.id}` },
+      hypothesisId: '',
+      actionIds: [],
+      observationIds: [],
+      evidenceIds: [],
+    },
+    approval,
+  );
+}
+
 /* ───────────────────────────────── PLAN phase ───────────────────────────────── */
 
 export async function runPlan(io: Io): Promise<void> {
@@ -149,6 +220,8 @@ export async function runPlan(io: Io): Promise<void> {
   const env = (context.env ?? {}) as Record<string, string | undefined>;
   const log = (level: 'info' | 'ok' | 'warn' | 'act', text: string) => emit('log', { ts: now(), level, text: redact(text, [pass]) });
 
+  let st: AssessmentStatus = 'DISCOVERY';
+  emit('status', { status: st });
   emit('phase', { phase: 'authenticate', label: 'Authenticating' });
   log('info', `Opening isolated browser for ${target.host}`);
   const d = await createDriver(context, (l, t) => log(l, t));
@@ -165,7 +238,7 @@ export async function runPlan(io: Io): Promise<void> {
     log('act', 'Signing in with the provided test credentials');
     const ok = await ensureLoggedIn(ctx);
     if (!ok) {
-      emit('error', { message: 'Sign-in failed with the provided credentials. Check the username and password and try again.' });
+      emit('error', { kind: 'auth', message: 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.' });
       return;
     }
     await ctx.shot('Signed in');
@@ -248,7 +321,16 @@ export async function runPlan(io: Io): Promise<void> {
     } else {
       log('warn', `Model Gateway unavailable (${llm.error}); using built-in plan templates`);
     }
+    // Risk is derived from the final text in code — never from a model or client-supplied value.
+    for (const it of items) {
+      it.risk = effectiveRisk(it);
+      it.requiresApproval = it.risk === 'REVIEW';
+    }
+    st = transition(st, 'PLAN');
+    emit('status', { status: st });
     emit('plan', { items, source: llm.ok ? 'model' : 'fallback', model: llm.ok ? llm.model : null });
+    st = transition(st, 'APPROVAL');
+    emit('status', { status: st });
     emit('paused', { reason: 'plan_review' });
     await persist(io, { phase: 'plan_review', surfaces, claims, plan: items, updatedAt: now() });
   } finally {
@@ -258,7 +340,7 @@ export async function runPlan(io: Io): Promise<void> {
 
 /* ─────────────────────────────── EXECUTE / PROVE phase ─────────────────────────────── */
 
-const COUNT_KEYS = ['VERIFIED', 'CONTRADICTED', 'PARTIALLY_VERIFIED', 'NOT_VERIFIED', 'NEEDS_HUMAN_REVIEW'] as const;
+const COUNT_KEYS = ['SUPPORTED', 'CONTRADICTED', 'PARTIALLY_VERIFIED', 'NOT_VERIFIED', 'INCONCLUSIVE', 'NEEDS_HUMAN_REVIEW'] as const;
 
 export async function runExecute(io: Io): Promise<void> {
   const { emit, context } = io;
@@ -277,30 +359,40 @@ export async function runExecute(io: Io): Promise<void> {
     emit('live', { url: d.liveUrl ?? null, mode: d.mode });
     const ctx = buildCtx(io, d, target, user, pass, surfaces);
 
+    let st: AssessmentStatus = from > 0 ? 'PAUSED' : 'APPROVAL';
+    st = transition(st, 'EXECUTION');
+    emit('status', { status: st });
+
     for (let i = from; i < plan.length; i++) {
       const item = plan[i];
-      if (!item.enabled) {
-        const f: Finding = {
-          id: `f-${item.id}`, testId: item.id, claimId: item.claimId, claim: item.claim, title: item.title,
-          status: 'NOT_VERIFIED', testStatus: 'SKIPPED', severity: 'INFO', expected: item.expected,
-          observed: 'Removed from the plan by the reviewer.', test: 'Skipped by reviewer',
-          evidence: { screenshotIds: [], route: '', timestamp: now(), network: [], console: [], traceRef: `${ctx.runId}#${item.id}` },
-        };
+      const g = gate(item, approvals); // policy is enforced here, server-side, on every call
+
+      if (g === 'skip' || g === 'blocked') {
+        const f =
+          g === 'blocked'
+            ? withoutRun(ctx, item, 'NEEDS_HUMAN_REVIEW', 'BLOCKED', 'Blocked by the ProofLayer safety policy: payments, destructive or mass operations, and anything outside the assessment scope are never executed.')
+            : withoutRun(ctx, item, 'NOT_VERIFIED', 'SKIPPED', item.enabled ? 'The reviewer chose not to run this validation, so the claim remains unverified.' : 'Removed from the plan by the reviewer.', approvals[item.id]);
         findings.push(f);
-        emit('test', { id: item.id, status: 'SKIPPED', title: item.title });
+        emit('test', { id: item.id, status: f.testStatus, title: item.title });
         emit('finding', f);
         continue;
       }
 
-      if (item.requiresApproval && !approvals[item.id]) {
+      if (g === 'ask') {
         emit('hitl', {
           id: item.id,
           kind: 'test_approval',
-          title: 'ProofLayer needs your input',
-          body: `I found an AI data-protection claim: “${item.claim}”. I can validate it by submitting synthetic sensitive data (a fake SSN, card number and email) to the AI assistant and checking what is sent to the model.`,
+          title: 'Human review required',
+          risk: effectiveRisk(item),
+          body: `The next test submits synthetic sensitive data (a fake SSN, card number and email) to the product's AI assistant, to check what is sent to the model. Claim: “${item.claim}”.`,
+          procedure: item.procedure,
           expected: item.expected,
+          ifApproved: 'ProofLayer submits the synthetic data, observes the outbound payload and records the result.',
+          ifSkipped: 'The claim stays NOT VERIFIED and nothing is submitted.',
           defaultPayload: DEFAULT_AI_PAYLOAD,
         });
+        st = transition(st, 'PAUSED');
+        emit('status', { status: st });
         emit('paused', { reason: 'test_approval', fromIndex: i, testId: item.id });
         await persist(io, { phase: 'awaiting_approval', testId: item.id, fromIndex: i, findings: findings.length, updatedAt: now() });
         return;
@@ -315,13 +407,9 @@ export async function runExecute(io: Io): Promise<void> {
       } catch (e) {
         const msg = redact(String((e as Error)?.message ?? e), [pass]);
         ctx.log('warn', `Test could not complete: ${msg}`);
-        f = {
-          id: `f-${item.id}`, testId: item.id, claimId: item.claimId, claim: item.claim, title: item.title,
-          status: 'NEEDS_HUMAN_REVIEW', testStatus: 'BLOCKED', severity: 'INFO', expected: item.expected,
-          observed: `The test could not complete: ${msg}`, test: item.hypothesis,
-          evidence: { screenshotIds: [], route: '', timestamp: now(), network: [], console: [], traceRef: `${ctx.runId}#${item.id}` },
-        };
+        f = withoutRun(ctx, item, 'INCONCLUSIVE', 'BLOCKED', `The validation could not be completed (${msg}). No conclusion was made about the vendor claim.`);
       }
+      f = linkFinding(ctx, item, f, approvals[item.id]);
       findings.push(f);
       ctx.trace('finding', `${f.status} — ${f.observed.slice(0, 140)}`, item.id);
       emit('test', { id: item.id, status: f.testStatus, title: item.title });
@@ -330,6 +418,8 @@ export async function runExecute(io: Io): Promise<void> {
     }
 
     /* ── prove ── */
+    st = transition(st, 'FINDINGS');
+    emit('status', { status: st });
     emit('phase', { phase: 'prove', label: 'Compiling evidence-backed report' });
     const counts: Record<string, number> = {};
     for (const k of COUNT_KEYS) counts[k] = findings.filter((f) => f.status === k).length;
@@ -337,7 +427,7 @@ export async function runExecute(io: Io): Promise<void> {
 
     let narrative =
       `${findings.length} vendor claims were evaluated against observed product behavior: ` +
-      `${counts.VERIFIED} verified, ${counts.CONTRADICTED} contradicted, ${counts.PARTIALLY_VERIFIED} partially verified, ${counts.NOT_VERIFIED} not verifiable from the outside.` +
+      `${counts.SUPPORTED} supported, ${counts.CONTRADICTED} contradicted, ${counts.PARTIALLY_VERIFIED} partially verified, ${counts.NOT_VERIFIED} not verifiable from the outside.` +
       (hero ? ` Most important: “${hero.claim}” was contradicted — ${hero.observed}` : '');
     let source: 'model' | 'fallback' = 'fallback';
     const llm = await llmJSON<{ summary: string }>(

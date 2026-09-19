@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "dev:agents": "edgeone makers dev",
     "test:local": "tsx scripts/local-run.ts",
-    "record": "tsx scripts/local-run.ts --record"
+    "record": "tsx scripts/local-run.ts --record",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@openai/agents": "^0.11.4",

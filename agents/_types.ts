@@ -1,11 +1,17 @@
 /** Shared types for the ProofLayer orchestrator (private module — not a route). */
 
 export type ClaimStatus =
-  | 'VERIFIED'
+  | 'UNTESTED'
+  | 'PLANNED'
+  | 'EXECUTING'
+  | 'SUPPORTED'
   | 'CONTRADICTED'
   | 'PARTIALLY_VERIFIED'
   | 'NOT_VERIFIED'
+  | 'INCONCLUSIVE'
   | 'NEEDS_HUMAN_REVIEW';
+
+export type Risk = 'SAFE' | 'REVIEW' | 'BLOCKED';
 
 export type TestStatus = 'PASS' | 'FAIL' | 'INCONCLUSIVE' | 'SKIPPED' | 'BLOCKED';
 export type Severity = 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
@@ -45,6 +51,9 @@ export interface PlanItem {
   expected: string;
   rationale: string;
   priority: 'high' | 'medium' | 'low';
+  /** Ordered actions ProofLayer will take — shown to the human before anything runs. */
+  procedure: string[];
+  risk: Risk;
   requiresApproval: boolean;
   enabled: boolean;
 }
@@ -88,6 +97,12 @@ export interface Finding {
   test: string;
   evidence: Evidence;
   recommendation?: string;
+  /** Reasoning chain: claimId → hypothesisId → actions → observations → evidence → conclusion(status). */
+  hypothesisId: string;
+  actionIds: string[];
+  observationIds: string[];
+  evidenceIds: string[];
+  approval?: { decision: 'run' | 'skip'; at: string; modified: boolean };
 }
 
 export interface Approval {

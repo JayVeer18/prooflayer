@@ -23,6 +23,8 @@ import type {
 
 export interface Ctx {
   d: Driver;
+  /** Every trace step emitted so far (used to link findings to actions/observations). */
+  traceLog: Array<{ id: string; kind: string; ref?: string }>;
   target: URL;
   user: string;
   pass: string;
@@ -148,6 +150,10 @@ function finding(
     test: p.test,
     evidence: p.evidence,
     recommendation: p.recommendation,
+    hypothesisId: `h-${item.id}`,
+    actionIds: [],
+    observationIds: [],
+    evidenceIds: [],
   };
 }
 
@@ -171,11 +177,11 @@ export async function authSession(ctx: Ctx, item: PlanItem): Promise<Finding> {
   ctx.log('act', 'Opening the sign-in page');
   if (!(await openLogin(ctx))) {
     return finding(item, {
-      status: 'NEEDS_HUMAN_REVIEW',
+      status: 'INCONCLUSIVE',
       testStatus: 'BLOCKED',
       severity: 'INFO',
       test: 'Locate sign-in form',
-      observed: 'ProofLayer could not find a sign-in form at the provided URL.',
+      observed: 'The validation could not be completed: no sign-in form was found at the provided URL. No conclusion was made about the vendor claim.',
       evidence: evidence(ctx, item, pathOf(ctx.target.href), shots, net, con),
     });
   }
@@ -207,11 +213,11 @@ export async function authSession(ctx: Ctx, item: PlanItem): Promise<Finding> {
 
   if (!loggedIn) {
     return finding(item, {
-      status: 'NEEDS_HUMAN_REVIEW',
+      status: 'INCONCLUSIVE',
       testStatus: 'BLOCKED',
       severity: 'INFO',
       test: 'Sign in with provided credentials',
-      observed: 'Sign-in with the provided credentials did not succeed, so session behavior could not be assessed.',
+      observed: 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.',
       evidence: evidence(ctx, item, pathOf(landing), shots, net, con),
       recommendation: 'Confirm the test credentials are valid and re-run.',
     });
@@ -236,7 +242,7 @@ export async function authSession(ctx: Ctx, item: PlanItem): Promise<Finding> {
     return finding(item, { status: 'CONTRADICTED', testStatus: 'FAIL', severity: 'HIGH', test, evidence: ev, observed: `After logout, ${pathOf(landing)} still rendered without re-authentication.` });
   }
   return finding(item, {
-    status: 'VERIFIED',
+    status: 'SUPPORTED',
     testStatus: 'PASS',
     severity: 'INFO',
     test,
@@ -256,11 +262,11 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
 
   if (!(await ensureLoggedIn(ctx))) {
     return finding(item, {
-      status: 'NEEDS_HUMAN_REVIEW',
+      status: 'INCONCLUSIVE',
       testStatus: 'BLOCKED',
       severity: 'INFO',
       test: 'Sign in as the provided standard user',
-      observed: 'Could not sign in with the provided credentials.',
+      observed: 'AUTHENTICATION FAILED — ProofLayer could not establish the supplied test credentials. No assessment conclusion was made.',
       evidence: evidence(ctx, item, pathOf(ctx.target.href), shots, [], []),
     });
   }
@@ -300,6 +306,15 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
       continue;
     }
 
+    // A 200 alone proves nothing (single-page apps often serve the same shell for every path).
+    // Only count it as privileged access if the page looks administrative or calls a privileged API.
+    const privilegedApi = flushed.network.some((n) => n.kind !== 'document' && (n.status ?? 0) < 300 && /user|admin|role/i.test(n.url));
+    if (!ADMINISH.test(`${res.title} ${text.slice(0, 500)}`) && !privilegedApi) {
+      notFound++;
+      ctx.trace('observation', `${pathOf(url)} returned a generic page — not treated as administrative access`, item.id);
+      continue;
+    }
+
     // The page rendered for a standard user.
     const rows = Number(await d.evaluate<number>(`document.querySelectorAll('tbody tr, [role="row"]').length`)) || 0;
     const shotId = await ctx.shot(`Standard user reached ${pathOf(finalUrl.href)}`);
@@ -326,7 +341,7 @@ export async function rbacDirectNav(ctx: Ctx, item: PlanItem): Promise<Finding> 
   const test = `Signed in as a standard user, navigated directly to ${candidates.length} privileged routes`;
   if (denied > 0 && notFound < candidates.length) {
     return finding(item, {
-      status: 'VERIFIED',
+      status: 'SUPPORTED',
       testStatus: 'PASS',
       severity: 'INFO',
       test,
@@ -392,7 +407,7 @@ export async function runtimeSignals(ctx: Ctx, item: PlanItem): Promise<Finding>
     });
   }
   return finding(item, {
-    status: 'VERIFIED',
+    status: 'SUPPORTED',
     testStatus: 'PASS',
     severity: 'INFO',
     test,
@@ -432,11 +447,11 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
   const ai = ctx.surfaces.find((s) => !s.hidden && /\bai\b|assistant|copilot|govern/i.test(`${s.name} ${s.path}`));
   if (!ai || !(await ensureLoggedIn(ctx))) {
     return finding(item, {
-      status: 'NEEDS_HUMAN_REVIEW',
+      status: 'INCONCLUSIVE',
       testStatus: 'BLOCKED',
       severity: 'INFO',
       test,
-      observed: 'No AI assistant surface was reachable to test.',
+      observed: 'The validation could not be completed: no AI assistant surface was reachable. No conclusion was made about the vendor claim.',
       evidence: evidence(ctx, item, '', shots, [], []),
     });
   }
@@ -484,7 +499,7 @@ export async function aiDataProtection(ctx: Ctx, item: PlanItem, approval?: Appr
   const ev = evidence(ctx, item, route, shots, f.network, f.console);
 
   if (leaked.length === 0) {
-    return finding(item, { status: 'VERIFIED', testStatus: 'PASS', severity: 'INFO', test, evidence: ev, observed: `All ${present.length} synthetic sensitive values were masked before reaching the model.` });
+    return finding(item, { status: 'SUPPORTED', testStatus: 'PASS', severity: 'INFO', test, evidence: ev, observed: `All ${present.length} synthetic sensitive values were masked before reaching the model.` });
   }
   if (masked.length === 0) {
     return finding(item, { status: 'CONTRADICTED', testStatus: 'FAIL', severity: 'HIGH', test, evidence: ev, observed: `None of the synthetic sensitive values were masked; ${leaked.map((l) => l.name).join(', ')} reached the model in clear text.` });
