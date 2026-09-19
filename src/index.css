@@ -126,3 +126,17 @@ h2{font-size:22px;margin:6px 0;letter-spacing:-.01em}
   .split{grid-template-columns:1fr}.side{border-top:1px solid var(--line)}
   .hero{grid-template-columns:1fr}.row2{grid-template-columns:1fr}
 }
+
+/* platform strip */
+.strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:7px 20px;border-bottom:1px solid var(--line);background:#0f1013}
+.strip-l{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:#5d616b;margin-right:4px}
+.sc{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.sc b{font-family:var(--mono);font-weight:500;color:#aab0c0}
+.sc i{width:6px;height:6px;border-radius:50%;background:#3a3d45}
+.sc.on i{background:var(--ok);box-shadow:0 0 6px #3fb27f88}
+.ghost.wide{width:100%;margin-top:10px}
+.tgroup{margin-bottom:12px}
+.tg-h{font-family:var(--sans);font-size:12px;font-weight:600;color:var(--ink);margin:6px 0 2px}
+.tk-claim>span{color:#c4d0ff}.tk-hypothesis>span{color:#9fb8ff}.tk-action>span{color:var(--warn)}
+.tk-observation>span{color:#9bd8bc}.tk-evidence>span{color:#d9a6ff}.tk-finding>span{color:var(--bad)}
+.bar .ghost.sm{margin-left:0}

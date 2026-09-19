@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { newConversationId, runProbe, streamAssess } from './api';
+import { streamReplay } from './replay';
 import type { Approval, Claim, Complete, ConEvt, Finding, Hitl, LogLine, NetEvt, PlanItem, Shot, Surface, TraceStep } from './types';
 
 type Screen = 'launch' | 'live' | 'plan' | 'report';
@@ -24,6 +25,43 @@ const pathOnly = (u: string) => {
 
 function Badge({ status }: { status: string }) {
   return <span className={`badge b-${status}`}>{STATUS_LABEL[status] ?? status}</span>;
+}
+
+function PlatformStrip({ mode, model, runId, replay, checkpoint }: { mode?: string; model: string | null; runId?: string; replay: boolean; checkpoint: boolean }) {
+  const chips: Array<[string, string, boolean]> = [
+    ['Agent Runtime', replay ? 'recorded' : 'Makers', true],
+    ['Sandbox browser', mode ?? '…', Boolean(mode)],
+    ['Model Gateway', model ?? 'plan templates', Boolean(model)],
+    ['Session state', checkpoint ? 'checkpointed' : '…', checkpoint],
+    ['Tracing', runId ? runId.slice(-10) : '…', Boolean(runId)],
+  ];
+  return (
+    <div className="strip" title="Live values from this assessment">
+      <span className="strip-l">POWERED BY TENCENT EDGEONE MAKERS</span>
+      {chips.map(([k, v, on]) => (
+        <span key={k} className={`sc ${on ? 'on' : ''}`}>
+          <i />
+          {k} <b>{v}</b>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function downloadReport(done: Complete | null, findings: Finding[]) {
+  const body = {
+    tool: 'ProofLayer',
+    generatedAt: new Date().toISOString(),
+    summary: done?.narrative,
+    counts: done?.counts,
+    findings: findings.map((f) => ({ ...f, evidence: { ...f.evidence } })),
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'prooflayer-report.json';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function App() {
@@ -65,6 +103,8 @@ export default function App() {
   const [payload, setPayload] = useState('');
   const [done, setDone] = useState<Complete | null>(null);
   const [probe, setProbe] = useState<any>(null);
+  const [replay, setReplay] = useState(false);
+  const replayRef = useRef(false);
   const logEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -139,7 +179,8 @@ export default function App() {
       setError('');
       pausedRef.current = null;
       try {
-        await streamAssess(cid.current, { ...body, targetUrl: form.targetUrl, username: form.username, password: form.password }, onEvent);
+        if (replayRef.current) await streamReplay(body, onEvent);
+        else await streamAssess(cid.current, { ...body, targetUrl: form.targetUrl, username: form.username, password: form.password }, onEvent);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -149,7 +190,9 @@ export default function App() {
     [form.targetUrl, form.username, form.password, onEvent],
   );
 
-  const start = () => {
+  const start = (asReplay = false) => {
+    replayRef.current = asReplay;
+    setReplay(asReplay);
     cid.current = newConversationId();
     findingsRef.current = [];
     approvalsRef.current = {};
@@ -225,8 +268,11 @@ export default function App() {
             Vendor claims to validate <span className="opt">optional — leave empty and ProofLayer finds them</span>
             <textarea rows={2} value={form.claims} onChange={(e) => setForm({ ...form, claims: e.target.value })} placeholder="One claim per line" />
           </label>
-          <button className="primary" onClick={start} disabled={!form.targetUrl || !form.username || !form.password}>
+          <button className="primary" onClick={() => start(false)} disabled={!form.targetUrl || !form.username || !form.password}>
             Run assessment
+          </button>
+          <button className="ghost wide" onClick={() => start(true)} title="Plays back a real recorded run of the demo target — no sandbox needed">
+            Play recorded run
           </button>
           <div className="fine">Powered by Tencent EdgeOne Makers · Isolated browser assessment · Credentials stay in memory</div>
           <button
@@ -336,10 +382,14 @@ export default function App() {
         <header className="bar">
           <span className="wordmark sm">PROOFLAYER</span>
           <span className="crumb">Assessment complete</span>
+          <button className="ghost sm" onClick={() => downloadReport(done, findings)}>
+            Download report
+          </button>
           <button className="ghost sm" onClick={() => setScreen('live')}>
             View live session
           </button>
         </header>
+        <PlatformStrip mode={live?.mode} model={planSource?.model ?? null} runId={findings[0]?.evidence.traceRef.split('#')[0]} replay={replay} checkpoint />
         <main className="wide">
           <div className="summary">
             <div>
@@ -447,6 +497,7 @@ export default function App() {
           {busy && <i className="pulse" />}
         </span>
       </header>
+      <PlatformStrip mode={live?.mode} model={planSource?.model ?? null} runId={findings[0]?.evidence.traceRef.split('#')[0]} replay={replay} checkpoint={plan.length > 0} />
       <div className="split">
         <section className="pane browser">
           <div className="pane-h">
@@ -498,7 +549,18 @@ export default function App() {
                 );
               })}
           </ul>
-          {error && <div className="err">{error}</div>}
+          {error && (
+            <div className="err">
+              {error}
+              {!replay && (
+                <div style={{ marginTop: 8 }}>
+                  <button className="ghost sm" onClick={() => start(true)}>
+                    Play recorded run instead
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </aside>
       </div>
       <section className="tabs">
@@ -566,11 +628,25 @@ export default function App() {
             </div>
           )}
           {tab === 'trace' &&
-            trace.map((t) => (
-              <div key={t.id} className="ln">
-                <span>{t.kind}</span>
-                {t.text}
-              </div>
+            (trace.length ? (
+              Object.entries(
+                trace.reduce<Record<string, TraceStep[]>>((acc, t) => {
+                  (acc[t.ref ?? 'session'] ||= []).push(t);
+                  return acc;
+                }, {}),
+              ).map(([ref, steps]) => (
+                <div key={ref} className="tgroup">
+                  <div className="tg-h">{plan.find((p) => p.id === ref)?.title ?? 'Session'}</div>
+                  {steps.map((t) => (
+                    <div key={t.id} className={`ln tk-${t.kind}`}>
+                      <span>{t.kind}</span>
+                      {t.text}
+                    </div>
+                  ))}
+                </div>
+              ))
+            ) : (
+              <div className="muted">The claim → hypothesis → action → observation → evidence → finding chain appears here as tests run.</div>
             ))}
         </div>
       </section>
@@ -584,6 +660,7 @@ export default function App() {
               <b>Expected behavior:</b> {hitl.expected}
             </p>
             {modify && <textarea rows={4} value={payload} onChange={(e) => setPayload(e.target.value)} />}
+            {replay && <p className="muted">Replay mode: the recorded outcome plays regardless of this choice.</p>}
             <div className="actions">
               <button className="ghost" onClick={() => decide('skip')}>
                 Skip
