@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · AcmeDesk</title><link rel="stylesheet" href="/demo/assets/app.css"></head>
+<body>
+<div class="login">
+  <div class="card">
+    <div class="brand" style="font-size:22px;margin-bottom:4px">Acme<b>Desk</b></div>
+    <p class="sub" style="margin-bottom:8px">Customer operations for growing teams.</p>
+    <form id="f" novalidate>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <div class="err" id="err" role="alert"></div>
+      <button type="submit" style="width:100%;margin-top:6px">Sign in</button>
+    </form>
+  </div>
+  <p class="foot">Enterprise role-based access control keeps administrative features restricted to authorized admins.<br>Secure authentication and automatic session management on every device.</p>
+</div>
+<script src="/demo/assets/app.js"></script>
+<script>
+  if (Acme.session()) location.replace('/demo/dashboard/');
+  document.getElementById('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var email = document.getElementById('email').value, pw = document.getElementById('password').value;
+    var err = document.getElementById('err');
+    if (!email || !pw) { err.textContent = 'Email and password are required.'; return; }
+    var r = Acme.login(email, pw);
+    if (!r.ok) { err.textContent = r.error; return; }
+    location.replace('/demo/dashboard/');
+  });
+</script>
+</body></html>

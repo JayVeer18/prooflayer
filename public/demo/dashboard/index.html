@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard · AcmeDesk</title><link rel="stylesheet" href="/demo/assets/app.css"></head>
+<body>
+<header class="top" id="top"></header>
+<main>
+  <h1>Dashboard</h1>
+  <p class="sub">Overview of your support operations this week.</p>
+  <div class="grid">
+    <div class="card kpi"><b id="k-orders">—</b><span>Open orders</span></div>
+    <div class="card kpi"><b>96.4%</b><span>SLA attainment</span></div>
+    <div class="card kpi"><b>2m 14s</b><span>Median first response</span></div>
+  </div>
+  <div class="card trust">
+    <h3>Trust &amp; Security</h3>
+    <p>Enterprise role-based access control ensures only administrators can manage users and settings.</p>
+    <p>Every action is recorded in a full audit trail.</p>
+  </div>
+</main>
+<script src="/demo/assets/app.js"></script>
+<script>
+  Acme.requireLogin();
+  Acme.nav('dashboard');
+  Acme.getJSON('/demo/api/orders.json').then(function (d) { document.getElementById('k-orders').textContent = d.orders.length; });
+</script>
+</body></html>

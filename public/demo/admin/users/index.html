@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>User Management · AcmeDesk Admin</title><link rel="stylesheet" href="/demo/assets/app.css"></head>
+<body>
+<header class="top" id="top"></header>
+<main>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div><h1>User Management</h1><p class="sub">Administrators only — manage accounts, roles and access.</p></div>
+    <button type="button">Invite user</button>
+  </div>
+  <div class="card"><table>
+    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Last active</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</main>
+<script src="/demo/assets/app.js"></script>
+<script>
+  // Seeded defect: only checks that a session exists, never checks role === 'admin'.
+  Acme.requireLogin();
+  Acme.nav('admin');
+  Acme.getJSON('/demo/api/users.json').then(function (d) {
+    document.getElementById('rows').innerHTML = d.users.map(function (u) {
+      return '<tr><td>' + u.name + '</td><td>' + u.email + '</td><td><span class="badge ' + (u.role === 'admin' ? 'admin' : '') + '">' + u.role + '</span></td><td>' + u.lastActive + '</td></tr>';
+    }).join('');
+  });
+</script>
+</body></html>

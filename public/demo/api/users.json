@@ -1,0 +1,6 @@
+{"users":[
+{"name":"Avery Admin","email":"admin@acme-demo.test","role":"admin","lastActive":"2 min ago"},
+{"name":"Bailey Buyer","email":"buyer@acme-demo.test","role":"user","lastActive":"just now"},
+{"name":"Casey Support","email":"casey@acme-demo.test","role":"user","lastActive":"1 h ago"},
+{"name":"Devon Finance","email":"devon@acme-demo.test","role":"admin","lastActive":"3 h ago"}
+]}

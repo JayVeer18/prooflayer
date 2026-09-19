@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orders · AcmeDesk</title><link rel="stylesheet" href="/demo/assets/app.css"></head>
+<body>
+<header class="top" id="top"></header>
+<main>
+  <h1>Orders</h1>
+  <p class="sub">Recent customer orders.</p>
+  <div class="card"><table>
+    <thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</main>
+<script src="/demo/assets/app.js"></script>
+<script>
+  Acme.requireLogin();
+  Acme.nav('orders');
+  Acme.getJSON('/demo/api/orders.json').then(function (d) {
+    document.getElementById('rows').innerHTML = d.orders.map(function (o) {
+      return '<tr><td>' + o.id + '</td><td>' + o.customer + '</td><td>' + o.total + '</td><td><span class="badge">' + o.status + '</span></td></tr>';
+    }).join('');
+  });
+</script>
+</body></html>

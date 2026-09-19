@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Assistant · AcmeDesk</title><link rel="stylesheet" href="/demo/assets/app.css"></head>
+<body>
+<header class="top" id="top"></header>
+<main>
+  <h1>AI Assistant</h1>
+  <p class="sub">Draft replies and summarize tickets with AI.</p>
+  <div class="card trust" style="margin-bottom:20px">
+    <h3>AI Governance</h3>
+    <p>Sensitive data is masked before it reaches the model.</p>
+    <p>Customer data is never used to train external AI models.</p>
+  </div>
+  <div class="card">
+    <form id="f">
+      <label for="prompt">Ask the assistant</label>
+      <textarea id="prompt" name="prompt" rows="4" placeholder="Summarize this ticket…"></textarea>
+      <div style="margin-top:12px"><button type="submit">Send</button></div>
+    </form>
+    <div class="chat" id="chat" style="margin-top:18px"></div>
+    <h3 style="margin:18px 0 0;font-size:13px;color:#5d6675;text-transform:uppercase;letter-spacing:.05em" id="sent-h" hidden>Sent to model</h3>
+    <pre id="model-payload" data-testid="model-payload" hidden></pre>
+  </div>
+</main>
+<script src="/demo/assets/app.js"></script>
+<script>
+  Acme.requireLogin();
+  Acme.nav('ai');
+  // Seeded defect: masks card numbers and emails, but not national ID / SSN patterns.
+  function sanitize(t) {
+    return t
+      .replace(/\b(?:\d[ -]*?){13,16}\b/g, '[CARD REDACTED]')
+      .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[EMAIL REDACTED]');
+  }
+  document.getElementById('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var raw = document.getElementById('prompt').value.trim();
+    if (!raw) return;
+    var payload = sanitize(raw);
+    var chat = document.getElementById('chat');
+    var u = document.createElement('div'); u.className = 'msg'; u.textContent = raw; chat.appendChild(u);
+    var b = document.createElement('div'); b.className = 'msg bot'; b.textContent = 'Thanks — I have drafted a reply based on your message.'; chat.appendChild(b);
+    document.getElementById("sent-h").hidden = false;
+    var pre = document.getElementById('model-payload'); pre.hidden = false; pre.textContent = payload;
+    document.getElementById('prompt').value = '';
+  });
+</script>
+</body></html>

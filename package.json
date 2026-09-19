@@ -1,0 +1,34 @@
+{
+  "name": "prooflayer",
+  "private": true,
+  "description": "ProofLayer — buyer-side product assurance agent on EdgeOne Makers",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "dev:agents": "edgeone makers dev",
+    "test:local": "tsx scripts/local-run.ts"
+  },
+  "dependencies": {
+    "@openai/agents": "^0.11.4",
+    "dotenv": "^16.4.5",
+    "openai": "^6.35.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.0.0",
+    "playwright-core": "^1.49.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.2",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0"
+  }
+}
