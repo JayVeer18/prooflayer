@@ -42,7 +42,7 @@ export async function onRequest(context: any) {
     return cdpHost;
   });
   await run('import playwright-core', async () => {
-    const pw = await import('playwright-core');
+    const pw: any = await import(['playwright', 'core'].join('-'));
     if (!pw.chromium) throw new Error('chromium export missing');
   });
 

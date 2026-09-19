@@ -308,6 +308,12 @@ export class SandboxApiDriver implements Driver {
 
 /* ───────────────────────────────── factory ───────────────────────────────── */
 
+/** Loaded by a runtime name so the Makers agent bundler (esbuild) does not try to bundle it. */
+async function loadPlaywright(): Promise<any> {
+  const name = ['playwright', 'core'].join('-');
+  return import(name);
+}
+
 async function read(o: any, key: string): Promise<any> {
   if (!o) return undefined;
   const v = o[key];
@@ -321,7 +327,7 @@ export async function createDriver(
   const env = (context?.env ?? {}) as Record<string, string | undefined>;
 
   if ((env.PL_DRIVER ?? process.env.PL_DRIVER) === 'local') {
-    const pw = await import('playwright-core');
+    const pw = await loadPlaywright();
     const browser = await pw.chromium.launch({
       channel: process.env.PL_CHANNEL || 'msedge',
       headless: process.env.PL_HEADED ? false : true,
@@ -344,7 +350,7 @@ export async function createDriver(
   try {
     const cdpUrl = await read(sb, 'cdpUrl');
     if (!cdpUrl) throw new Error('no cdpUrl');
-    const pw = await import('playwright-core');
+    const pw = await loadPlaywright();
     const browser = await withTimeout(pw.chromium.connectOverCDP(String(cdpUrl)), 20000, 'CDP connect');
     const ctx = browser.contexts()[0] ?? (await browser.newContext());
     const page = ctx.pages()[0] ?? (await ctx.newPage());
